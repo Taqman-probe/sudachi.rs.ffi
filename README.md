@@ -168,10 +168,10 @@ Sudachi の解析モード
 
 ## ⚠️ 注意
 
-* Sudachi 辞書、プラグインDLL等が必要です
+* Sudachi 辞書、プラグインDLLが必要です
 * Windows / Linux / Mac でビルド成果物が異なります
 
-### Sudachi 辞書の準備
+### Sudachi 辞書の準備 (必須)
 
 以下をダウンロードしてください：
 
@@ -180,14 +180,14 @@ Sudachi の解析モード
 - 辞書ファイル（small / core / full）
 - `char.def`（character definition）
 
-### プラグインの準備
+### プラグインの準備 (なくても動くのかも)
 
 デフォルト設定では以下のプラグインを使用します：
 
-default_input_text
-simple_oov
-join_numeric
-join_katakana_oov
+- default_input_text
+- simple_oov
+- join_numeric
+- join_katakana_oov
 
 これらのバイナリ（.dll / .so / .dylib）は配布されていないため、
 sudachi.rsのリポジトリからビルドする必要があります。
