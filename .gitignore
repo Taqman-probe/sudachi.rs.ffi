@@ -1,0 +1,8 @@
+/target
+*.def
+*.dic
+*.dll
+*.so
+*.dylib
+*.lib
+.env

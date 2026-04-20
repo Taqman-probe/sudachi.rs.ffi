@@ -1,0 +1,13 @@
+[package]
+name = "sudachi-rs-ffi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "sudachi_ffi"
+
+[dependencies]
+serde = "1.0.228"
+serde_json = "1.0.149"
+sudachi = { git = "https://github.com/WorksApplications/sudachi.rs.git", package = "sudachi" }
