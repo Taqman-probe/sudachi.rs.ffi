@@ -46,15 +46,18 @@ Sudachi の設定ファイル (`sudachi.json`) と辞書を用意してくださ
 ### 3. 使用例 (TypeScript & Deno から利用)
 
 ```ts
-import { Sudachi } from "./mod.ts";
-
+let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
+if (Deno.build.os === "windows") {
+  configPath = configPath.slice(1);
+} 
 const sudachi = new Sudachi ({
-  configPath: new URL("../resources/sudachi.json", import.meta.url).pathname.slice(1),
+  configPath: configPath,
   mode: 2,           // A:0 / B:1 / C:2
   wakati: false,      // 分かち書き
   printAll: true,   // 詳細情報出力
   splitSentences: 0, // default:0 / only:1 / none:2
-  excludePos: ["記号", "助詞"]
+  excludePos: ["記号", "助詞"], // 品詞除外設定
+  multi: false // マルチスレッド
 });
 
 try {
@@ -67,9 +70,41 @@ try {
 ```
 
 ```sh
-export SUDACHI_FFI=./target/release/sudachi_ffi.so
+mkdir -p sudachi-demo/resources && mkdir -p sudachi-demo/deno && cd sudachi-demo
+# Download exsample
+curl -L https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/mod.ts -o deno/mod.ts
+curl -L https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/exsample.ts -o deno/exsample.ts
+curl -L https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/resources/sudachi_default.json -o resources/sudachi_default.json
+curl -L https://github.com/Taqman-probe/sudachi.rs.ffi/releases/download/v0.6.11-1/libsudachi_ffi.so -o resources/libsudachi_ffi.so
+# Download Dictionary
+curl -LO http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip
+unzip sudachi-dictionary-latest-core.zip
+mv sudachi-dictionary-*/system_core.dic resources/
+rm -rf sudachi-dictionary-latest-core.zip sudachi-dictionary-*/
+# Execute
+export SUDACHI_FFI=./resources/libsudachi_ffi.so
 deno run --allow-ffi --allow-read --allow-env deno/exsample.ts
 ```
+
+```powershell
+New-Item -ItemType Directory -Force -Path "sudachi-demo\deno"
+New-Item -ItemType Directory -Force -Path "sudachi-demo\resources"
+Set-Location "sudachi-demo"
+# Download exsample
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/mod.ts" -OutFile "mod.ts"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/exsample.ts" -OutFile "exsample.ts"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/resources/sudachi_default.json" -OutFile "resources/config_default.json"
+Invoke-WebRequest -Uri "https://github.com/Taqman-probe/sudachi.rs.ffi/releases/download/v0.6.11-1/sudachi_ffi.dll"-OutFile "resources/sudachi_ffi.dll"
+# Download Dictionary
+Invoke-WebRequest -Uri "http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip" -OutFile "sudachi-dictionary-latest-core.zip"
+Expand-Archive -Path "sudachi-dictionary-latest-core.zip" -DestinationPath "."
+Move-Item -Path "sudachi-dictionary-*/system_core.dic" -Destination "resources"
+Remove-Item -Path "sudachi-dictionary-latest-core.zip", "sudachi-dictionary-*" -Recurse
+# Execute
+$env:SUDACHI_FFI = "./resources/sudachi_ffi.dll"
+deno run --allow-ffi --allow-read --allow-env exsample.ts
+```
+
 #### 出力
 
 ```json
@@ -180,22 +215,32 @@ Sudachi の解析モード
 - 辞書ファイル（small / core / full）
 - `char.def`（character definition）
 
-### プラグインの準備 (なくても動くのかも)
+### プラグインについて
 
-デフォルト設定では以下のプラグインを使用します：
+デフォルト設定では以下のプラグインを使用するようです：
 
 - default_input_text
 - simple_oov
 - join_numeric
 - join_katakana_oov
 
-これらのバイナリ（.dll / .so / .dylib）は配布されていないため、
-sudachi.rsのリポジトリからビルドする必要があります。
+#### 推奨: 内蔵スタイル
+
+config_default.jsonを指定すると本体にエイリアス (Java版と同名のクラス指定) として組み込まれたプラグインを使用するため、外部ファイルは不要です。
+
+#### 上級: 外部指定スタイル
+
+config.jsonを指定すると、別途ダイナミックリンクライブラリのファイルを指定することになります。
+
+これらのバイナリ（.dll / .so / .dylib）は配布されていないため、sudachi.rsのリポジトリからビルドする必要があります。
 
 ```sh
 git clone https://github.com/WorksApplications/sudachi.rs
 cd sudachi.rs
-cargo build --release
+cargo build --release -p default_input_text
+cargo build --release -p simple_oov
+cargo build --release -p join_numeric
+cargo build --release -p join_katakana_oov
 ```
 ビルド後、生成された動的ライブラリを利用してください。
 

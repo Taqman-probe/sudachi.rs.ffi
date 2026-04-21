@@ -1,17 +1,19 @@
+let prefix = "lib";
 let libSuffix = "so";
 if (Deno.build.os === "windows") {
   libSuffix = "dll";
+  prefix = "";
 } else if (Deno.build.os === "darwin") {
   libSuffix = "dylib";
 }
-const libPath = Deno.env.get("SUDACHI_FFI") || `./target/release/sudachi_ffi.${libSuffix}`;
+const libPath = Deno.env.get("SUDACHI_FFI") || `./target/release/${prefix}sudachi_ffi.${libSuffix}`;
 
 export class Sudachi {
   private ptr: Deno.PointerValue;
 
   private dylib = Deno.dlopen(libPath, {
     init: {
-      parameters: ["buffer", "i8", "i8", "i8", "i8", "buffer"],
+      parameters: ["buffer", "i8", "i8", "i8", "i8", "buffer", "i8"],
       result: "pointer",
     },
     analyze: {
@@ -44,6 +46,7 @@ export class Sudachi {
     printAll: boolean,
     splitSentences: number, //0: Default, 1: Only, 2: None
     excludePos: Array<string>,
+    multi: boolean,
   }) {
     this.ptr = this.dylib.symbols.init(
       this.encode(config.configPath),
@@ -52,6 +55,7 @@ export class Sudachi {
       config.printAll ? 1 : 0,
       config.splitSentences,
       this.encode(JSON.stringify(config.excludePos)),
+      config.multi ? 1 : 0,
     );
 
     if (this.ptr === null) {

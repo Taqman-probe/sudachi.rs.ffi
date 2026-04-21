@@ -1,13 +1,19 @@
 import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { Sudachi } from "./mod.ts";
 
+let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
+if (Deno.build.os === "windows") {
+  configPath = configPath.slice(1);
+} 
+
 const baseConfig = {
-  configPath: new URL("../resources/sudachi.json", import.meta.url).pathname.slice(1),
+  configPath: configPath,
   mode: 2,
   wakati: false,
   printAll: false,
   splitSentences: 0,
   excludePos: [],
+  multi: false,
 };
 
 Deno.test("Sudachi FFI", async (t) => {
@@ -82,6 +88,25 @@ Deno.test("Sudachi FFI", async (t) => {
       const json = JSON.parse(res!);
       assertEquals(json[0].includes("に"), false);
       assertEquals(json[0], ["プロジェクト","関する","問い合わせ"]);
+    } finally {
+      sudachi.close();
+      sudachi.dylibInstance.close();
+    }
+  });
+
+  await t.step("6. multi (マルチスレッド)", () => {
+    const sudachi = new Sudachi({ 
+      ...baseConfig, 
+      wakati: true,
+      multi: true
+    });
+    try {
+      const res = sudachi.analyze(["今日はいい天気です！", "明日は雨かな？", "明後日は知らん。"]);
+      const json = JSON.parse(res!);
+      assertEquals(json.length, 3);
+      assertEquals(json[0][0], "今日");
+      assertEquals(json[1][0], "明日");
+      assertEquals(json[2][0], "明後日");
     } finally {
       sudachi.close();
       sudachi.dylibInstance.close();

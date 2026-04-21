@@ -5,7 +5,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::str::FromStr;
-//use serde::Serialize;
+use rayon::prelude::*;
 use sudachi::prelude::*;
 use sudachi::config::Config;
 use sudachi::dic::dictionary::JapaneseDictionary;
@@ -60,6 +60,7 @@ pub struct SudachiLib {
     print_all: bool,
     split_sentences: SentenceSplitMode,
     exclude_pos: Vec<String>, // ["記号", "助詞"] のような除外品詞リストのJSON
+    multi_thread: bool, // マルチスレッド化
 }
 
 /// 辞書の初期化
@@ -71,6 +72,7 @@ pub extern "C" fn init(
     is_print_all: i8,
     split_sentences_val: i8,
     exclude_pos_json: *const c_char,
+    is_multi: i8,
 ) -> *mut SudachiLib {
     let path_buf = if config_path.is_null() {
         None
@@ -107,27 +109,27 @@ pub extern "C" fn init(
         let exclude_pos_str = unsafe { CStr::from_ptr(exclude_pos_json).to_str().unwrap() };
         serde_json::from_str(&exclude_pos_str).expect("Faild to parse exclude_pos")
     };
-
     let dict = JapaneseDictionary::from_cfg(&config).expect("Failed to create dictionary");
-    Box::into_raw(Box::new(SudachiLib { path_buf, dict, mode, wakati, print_all, split_sentences, exclude_pos }))
+
+    let multi_thread = is_multi != 0;
+
+    Box::into_raw(Box::new(SudachiLib { 
+        path_buf,
+        dict,
+        mode,
+        wakati,
+        print_all,
+        split_sentences,
+        exclude_pos,
+        multi_thread
+    }))
 }
 
-/// メインの解析関数
-/// input_json: ["text1", "text2"] のようなJSON文字列
-#[unsafe(no_mangle)]
-pub extern "C" fn analyze(
-    ptr: *mut SudachiLib,
-    input_json: *const c_char,
-    out_len: *mut usize
-  ) -> *mut c_char {
-    let lib = unsafe { &mut *ptr };
-    let detail = Cli {wakati: lib.wakati, print_all: lib.print_all};
-    let input_str = unsafe { CStr::from_ptr(input_json).to_str().unwrap() };
-    if input_str.is_empty() {return std::ptr::null_mut()};
-    let inputs: Vec<String> = serde_json::from_str(input_str).unwrap_or_default();
-
-    let mut all_results = Vec::new();
-
+fn analyze_single (
+    inputs: Vec<String>,
+    lib: &SudachiLib
+) -> Vec<Vec<String>> {
+    let detail = Cli { wakati: lib.wakati, print_all: lib.print_all };
     let mut analyzer: Box<dyn Analysis> = match lib.split_sentences {
         SentenceSplitMode::Only => Box::new(SplitSentencesOnly::new(&lib.dict)),
         SentenceSplitMode::Default => with_output!(detail, lib.exclude_pos.clone(), |o| {
@@ -138,7 +140,7 @@ pub extern "C" fn analyze(
         }),
     };
 
-    for text in inputs {
+    inputs.into_iter().map(| text | {
         let lines: Vec<&str> = text
             .split(|c| c == '\n' || c == '\r')
             .filter(|s| !s.is_empty())
@@ -150,9 +152,71 @@ pub extern "C" fn analyze(
             analyzer.analyze(no_eol, &mut writer);
         }
 
-        all_results.push(format!("[{}]", writer.join(",")));
-    }
+        //format!("[{}]", writer.join(","))
+        writer
+    }).collect()
+}
 
+fn analyze_multi(
+    inputs: Vec<String>,
+    lib: &SudachiLib
+) -> Vec<Vec<String>> {
+    inputs.into_par_iter().map_init(
+        || {
+            // --- 初期化クロージャ (スレッドごとに1回実行) ---
+            let detail = Cli { wakati: lib.wakati, print_all: lib.print_all };
+            
+            // 各スレッド専用の analyzer を作成
+            let analyzer: Box<dyn Analysis> = match lib.split_sentences {
+                SentenceSplitMode::Only => Box::new(SplitSentencesOnly::new(&lib.dict)),
+                SentenceSplitMode::Default => with_output!(detail, lib.exclude_pos.clone(), |o| {
+                    AnalyzeSplitted::new(o, &lib.dict, lib.mode, false)
+                }),
+                SentenceSplitMode::None => with_output!(detail, lib.exclude_pos.clone(), |o| {
+                    AnalyzeNonSplitted::new(o, &lib.dict, lib.mode, false)
+                }),
+            };
+            analyzer
+        },
+        |analyzer, text| {
+            let lines: Vec<&str> = text
+                .split(|c| c == '\n' || c == '\r')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let mut writer: Vec<String> = Vec::new();
+
+            // tokenize and output results
+            for no_eol in lines.iter() {
+                analyzer.analyze(no_eol, &mut writer);
+            }
+
+            //format!("[{}]", writer.join(","))
+            writer
+    }).collect()
+}
+
+/// メインの解析関数
+/// input_json: ["text1", "text2"] のようなJSON文字列
+#[unsafe(no_mangle)]
+pub extern "C" fn analyze(
+    ptr: *mut SudachiLib,
+    input_json: *const c_char,
+    out_len: *mut usize
+  ) -> *mut c_char {
+    let lib = unsafe { &mut *ptr };
+    let input_str = unsafe { CStr::from_ptr(input_json).to_str().unwrap() };
+    if input_str.is_empty() {return std::ptr::null_mut()};
+    let inputs: Vec<String> = serde_json::from_str(input_str).unwrap_or_default();
+
+    let all_results_arr = if lib.multi_thread {
+        analyze_multi(inputs, lib)
+    } else {
+        analyze_single(inputs, lib)
+    };
+
+    let all_results:Vec<_> = all_results_arr.into_iter().map(|arr| {
+        format!("[{}]", arr.join(","))
+    }).collect();
     let result_json = format!("[{}]", &all_results.join(","));
     let res_ptr = CString::new(result_json).unwrap().into_raw();
 
@@ -208,19 +272,19 @@ mod tests {
     fn test_all_patterns() {
         let confing_path = CString::new("./resources/sudachi.json").unwrap();
         // split_sentences: Only (文分割のみ)
-        let lib_only = init(confing_path.as_ptr(), 2, 0, 0, 1, ptr::null());
+        let lib_only = init(confing_path.as_ptr(), 2, 0, 0, 1, ptr::null(), 0);
         let res1 = run_analyze(lib_only, "今日はいい天気。明日は雨？明後日は地震雷火事親父！");
         assert!(serde_json::from_str::<Vec<Vec<String>>>(&res1).unwrap() == [["今日はいい天気。明日は雨？", "明後日は地震雷火事親父！"]]);
         free_sudachi(lib_only);
 
         // wakati: true (わかち書き)
-        let lib_wakati = init(confing_path.as_ptr(), 2, 1, 0, 0, ptr::null());
+        let lib_wakati = init(confing_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 0);
         let res2 = run_analyze(lib_wakati, "「この味がいいね」と君が言ったから七月六日はサラダ記念日（俵万智『サラダ記念日』より");
         assert!(serde_json::from_str::<Vec<Vec<String>>>(&res2).unwrap() == [["「", "この", "味", "が", "いい", "ね", "」", "と", "君", "が", "言っ", "た", "から", "七", "月", "六", "日", "は", "サラダ", "記念日", "（", "俵", "万智", "『", "サラダ", "記念日", "』", "より"]]);
         free_sudachi(lib_wakati);
 
         // wakati: false, print_all: false (標準構造)
-        let lib_simple = init(confing_path.as_ptr(), 2, 0, 0, 0, ptr::null());
+        let lib_simple = init(confing_path.as_ptr(), 2, 0, 0, 0, ptr::null(), 0);
         let res3 = run_analyze(lib_simple, "記念日");
         assert!(res3.contains("記念日"));
         assert!(res3.contains("名詞"));
@@ -232,7 +296,7 @@ mod tests {
         free_sudachi(lib_simple);
 
         // wakati: false, print_all: true (詳細構造)
-        let lib_detail = init(confing_path.as_ptr(), 2, 0, 1, 0, ptr::null());
+        let lib_detail = init(confing_path.as_ptr(), 2, 0, 1, 0, ptr::null(), 0);
         let res4 = run_analyze(lib_detail, "記念日");
         assert!(res4.contains("記念日"));
         assert!(res4.contains("名詞"));
@@ -245,9 +309,35 @@ mod tests {
 
         // exclude_pos (品詞除外、"助詞" を除外する)
         let exclude_json = CString::new(r#"["助詞", "助動詞"]"#).unwrap();
-        let lib_exclude = init(confing_path.as_ptr(), 2, 1, 0, 0, exclude_json.as_ptr());
+        let lib_exclude = init(confing_path.as_ptr(), 2, 1, 0, 0, exclude_json.as_ptr(), 0);
         let res5 = run_analyze(lib_exclude, "君が言った");
         assert!(serde_json::from_str::<Vec<Vec<String>>>(&res5).unwrap() == [["君", "言っ"]]);
         free_sudachi(lib_exclude);
+    }
+
+    #[test]
+    fn test_multi_thread() {
+        let confing_path = CString::new("./resources/sudachi.json").unwrap();
+        // is_multi を 1 に設定
+        let lib_multi = init(confing_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 1);
+        
+        // 複数の入力を準備
+        let input_json = CString::new(r#"["リンゴを食べます", "明日は晴れです", "東京に行きます"]"#).unwrap();
+        let mut out_len: usize = 0;
+        
+        let res_ptr = analyze(lib_multi, input_json.as_ptr(), &mut out_len);
+        assert!(!res_ptr.is_null());
+        
+        let result = unsafe { CStr::from_ptr(res_ptr).to_string_lossy().into_owned() };
+        
+        // JSONとしてパースできるか、期待した要素数（この場合3つ）があるか確認
+        let parsed: Vec<Vec<String>> = serde_json::from_str(&result).expect("Failed to parse multi-thread JSON");
+        assert_eq!(parsed.len(), 3);
+        assert!(parsed[0][0] == "リンゴ");
+        assert!(parsed[1][0] == "明日");
+        assert!(parsed[2][0] == "東京");
+
+        free_string(res_ptr);
+        free_sudachi(lib_multi);
     }
 }
