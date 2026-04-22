@@ -43,9 +43,9 @@ struct Cli {
 macro_rules! with_output {
     ($cli: expr, $exclude_pos: expr, $f: expr) => {
         if $cli.wakati {
-            Box::new($f(output::Wakachi::new($exclude_pos)))
+            Box::new($f(output::WakachiJSON::new($exclude_pos)))
         } else {
-            Box::new($f(output::Simple::new($cli.print_all, $exclude_pos)))
+            Box::new($f(output::SimpleJSON::new($cli.print_all, $exclude_pos)))
         }
     };
 }
@@ -258,6 +258,76 @@ pub extern "C" fn analyze(
         if !out_len.is_null() {
             let len = CStr::from_ptr(res_ptr).to_bytes().len() + 1;
             *out_len = len ;
+        }
+    }
+    res_ptr
+}
+
+/// バイナリ形式での解析関数
+/// input_data: u32(length1) + text1_bytes + u32(length2) + text2_bytes + ... の形式
+/// 各テキストの前に4バイトのu32（リトルエンディアン）で長さを指定
+/// バッファの終わりまで自動的に読み込む（JSON形式と異なり終わりマーカー不要）
+#[unsafe(no_mangle)]
+pub extern "C" fn analyze_raw(
+    ptr: *mut SudachiLib,
+    input_data: *const u8,
+    input_len: usize,
+    out_len: *mut usize
+  ) -> *mut c_char {
+    let lib = unsafe { &mut *ptr };
+    
+    let input_bytes = unsafe {
+        std::slice::from_raw_parts(input_data, input_len)
+    };
+    
+    // バイナリデータをパース
+    let mut inputs_owned = Vec::new();
+    let mut pos = 0;
+    
+    while pos < input_bytes.len() {
+        if pos + 4 > input_bytes.len() {
+            break; // 残りが4バイト未満の場合は終了
+        }
+        
+        // 4バイトをu32として読む（リトルエンディアン）
+        let len_bytes = [
+            input_bytes[pos],
+            input_bytes[pos + 1],
+            input_bytes[pos + 2],
+            input_bytes[pos + 3],
+        ];
+        let text_len = u32::from_le_bytes(len_bytes) as usize;
+        pos += 4;
+        
+        if pos + text_len > input_bytes.len() {
+            break; // テキストがバッファを超える場合は終了
+        }
+        
+        // UTF-8文字列に変換
+        if let Ok(text_str) = std::str::from_utf8(&input_bytes[pos..pos + text_len]) {
+            inputs_owned.push(text_str.to_string());
+        }
+        pos += text_len;
+    }
+    
+    if inputs_owned.is_empty() {
+        return std::ptr::null_mut();
+    }
+    
+    let inputs_refs: Vec<&str> = inputs_owned.iter().map(|s| s.as_str()).collect();
+    
+    let all_results = if lib.multi_thread {
+        analyze_multi(inputs_refs, lib)
+    } else {
+        analyze_single(inputs_refs, lib)
+    };
+
+    let res_ptr = CString::new(all_results).unwrap().into_raw();
+
+    unsafe {
+        if !out_len.is_null() {
+            let len = CStr::from_ptr(res_ptr).to_bytes().len() + 1;
+            *out_len = len;
         }
     }
     res_ptr

@@ -17,48 +17,6 @@
 use sudachi::analysis::stateless_tokenizer::DictionaryAccess;
 use sudachi::prelude::{MorphemeList, SudachiResult};
 
-pub trait SudachiOutput<T> {
-    fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()>;
-}
-
-pub struct Wakachi {
-    exclude_pos: Vec<String>,
-}
-
-impl Wakachi {
-    pub fn new(exclude_pos: Vec<String>) -> Wakachi {
-        Wakachi { exclude_pos }
-    }
-}
-
-impl<T: DictionaryAccess> SudachiOutput<T> for Wakachi {
-    fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()> {
-        if morphemes.is_empty() {
-            return Ok(());
-        }
-        for m in morphemes.iter() {
-            if !self.exclude_pos.contains(&m.part_of_speech()[0]) {
-                //writer.push(serde_json::to_string(&m.surface().to_string()).unwrap());
-                serde_json::to_writer(&mut *writer, &m.surface().as_bytes()).unwrap();
-                writer.push(b',');
-            }
-        }
-        if writer.last() == Some(&b',') { writer.pop(); }
-        Ok(())
-    }
-}
-
-pub struct Simple {
-    print_all: bool,
-    exclude_pos: Vec<String>,
-}
-
-impl Simple {
-    pub fn new(print_all: bool, exclude_pos: Vec<String>) -> Simple {
-        Simple { print_all, exclude_pos }
-    }
-}
-
 #[derive(serde::Serialize)]
 struct MorphemeJson<'a> {
     surface: &'a str,
@@ -72,7 +30,48 @@ struct MorphemeJson<'a> {
     is_oov: Option<bool>,
 }
 
-impl<T: DictionaryAccess> SudachiOutput<T> for Simple {
+pub trait SudachiOutput<T> {
+    fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()>;
+}
+
+pub struct WakachiJSON {
+    exclude_pos: Vec<String>,
+}
+
+impl WakachiJSON {
+    pub fn new(exclude_pos: Vec<String>) -> WakachiJSON {
+        WakachiJSON { exclude_pos }
+    }
+}
+
+impl<T: DictionaryAccess> SudachiOutput<T> for WakachiJSON {
+    fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()> {
+        if morphemes.is_empty() {
+            return Ok(());
+        }
+        for m in morphemes.iter() {
+            if !self.exclude_pos.contains(&m.part_of_speech()[0]) {
+                serde_json::to_writer(&mut *writer, &*m.surface()).unwrap();
+                writer.push(b',');
+            }
+        }
+        if writer.last() == Some(&b',') { writer.pop(); }
+        Ok(())
+    }
+}
+
+pub struct SimpleJSON {
+    print_all: bool,
+    exclude_pos: Vec<String>,
+}
+
+impl SimpleJSON {
+    pub fn new(print_all: bool, exclude_pos: Vec<String>) -> SimpleJSON {
+        SimpleJSON { print_all, exclude_pos }
+    }
+}
+
+impl<T: DictionaryAccess> SudachiOutput<T> for SimpleJSON {
     fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()> {
         for m in morphemes.iter() {
             if !self.exclude_pos.contains(&m.part_of_speech()[0]) {
@@ -81,7 +80,7 @@ impl<T: DictionaryAccess> SudachiOutput<T> for Simple {
                     poses: m.part_of_speech().iter().map(|s| s.as_str()).collect(),
                     normalized_form: m.normalized_form(),
                     dictionary_form: if self.print_all { Some(m.dictionary_form()) } else { None },
-                    reading_form: if self.print_all { Some(m.dictionary_form()) } else { None },
+                    reading_form: if self.print_all { Some(m.reading_form()) } else { None },
                     is_oov: if self.print_all && m.is_oov() { Some(true) } else { None },
                 };
                 serde_json::to_writer(&mut *writer, &entry).unwrap();

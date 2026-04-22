@@ -39,9 +39,10 @@ impl<'a> SplitSentencesOnly<'a> {
 impl<'a> Analysis for SplitSentencesOnly<'a> {
     fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
         for (_, sent) in self.splitter.split(input) {
-            //writer.push(serde_json::to_string(&sent.to_string()).unwrap());
             serde_json::to_writer(&mut *writer, &sent).unwrap();
+            writer.push(b',');
         };
+        if writer.last() == Some(&b',') { writer.pop(); }
     }
 }
 
