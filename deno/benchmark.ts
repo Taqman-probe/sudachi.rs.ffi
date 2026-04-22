@@ -3,8 +3,8 @@ import { Sudachi } from "./mod.ts";
 
 const categories = [
   "dokujo-tsushin", "it-life-hack", "kaden-channel",
-  //"livedoor-homme", "movie-enter", "peachy",
-  //"smax", "sports-watch", "topic-news"
+  "livedoor-homme", "movie-enter", "peachy",
+  "smax", "sports-watch", "topic-news"
 ];
 
 async function loadLivedoorCorpus(): Promise<string[]> {
@@ -61,7 +61,7 @@ const baseConfig = {
 Deno.bench("Multi thread", () => {
   const sudachi = new Sudachi ({...baseConfig, multi: true});
   try {
-    sudachi.analyze(inputs);
+    JSON.parse(sudachi.analyze(inputs)||"{}");
   } finally {
     sudachi.close();
     sudachi.dylibInstance.close();
@@ -70,7 +70,7 @@ Deno.bench("Multi thread", () => {
 Deno.bench("Single thread", () => {
   const sudachi = new Sudachi ({...baseConfig});
   try {
-    sudachi.analyze(inputs);
+    JSON.parse(sudachi.analyze(inputs) || "{}");
   } finally {
     sudachi.close();
     sudachi.dylibInstance.close();

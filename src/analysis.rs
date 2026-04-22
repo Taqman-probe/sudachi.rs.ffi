@@ -22,7 +22,7 @@ use sudachi::prelude::MorphemeList;
 use sudachi::sentence_splitter::{SentenceSplitter, SplitSentences};
 
 pub trait Analysis {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<String>);
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>);
 }
 
 pub struct SplitSentencesOnly<'a> {
@@ -37,9 +37,10 @@ impl<'a> SplitSentencesOnly<'a> {
 }
 
 impl<'a> Analysis for SplitSentencesOnly<'a> {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<String>) {
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
         for (_, sent) in self.splitter.split(input) {
-            writer.push(serde_json::to_string(&sent.to_string()).unwrap());
+            //writer.push(serde_json::to_string(&sent.to_string()).unwrap());
+            serde_json::to_writer(&mut *writer, &sent).unwrap();
         };
     }
 }
@@ -61,7 +62,7 @@ impl<D: DictionaryAccess + Clone, O: SudachiOutput<D>> AnalyzeNonSplitted<D, O> 
 }
 
 impl<D: DictionaryAccess, O: SudachiOutput<D>> Analysis for AnalyzeNonSplitted<D, O> {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<String>) {
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
         self.analyzer.reset().push_str(input);
         self.analyzer
             .do_tokenize()
@@ -90,9 +91,11 @@ impl<'a, D: DictionaryAccess + 'a, O: SudachiOutput<&'a D>> AnalyzeSplitted<'a, 
 }
 
 impl<'a, D: DictionaryAccess + 'a, O: SudachiOutput<&'a D>> Analysis for AnalyzeSplitted<'a, D, O> {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<String>) {
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
         for (_, sent) in self.splitter.split(input) {
             self.inner.analyze(sent, writer);
+            writer.push(b',');
         }
+        if writer.last() == Some(&b',') { writer.pop(); }
     }
 }

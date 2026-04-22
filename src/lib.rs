@@ -125,10 +125,24 @@ pub extern "C" fn init(
     }))
 }
 
-fn analyze_single (
-    inputs: Vec<String>,
+fn estimate_len(
+    input_len: usize,
     lib: &SudachiLib
-) -> Vec<Vec<String>> {
+) -> usize {
+    if lib.wakati {
+        (input_len as f64 * 1.5 as f64).round() as usize
+    } else if lib.print_all {
+        input_len * 75
+    } else {
+        input_len * 60
+    }
+}
+
+
+fn analyze_single (
+    inputs: Vec<&str>,
+    lib: &SudachiLib
+) -> Vec<u8> {
     let detail = Cli { wakati: lib.wakati, print_all: lib.print_all };
     let mut analyzer: Box<dyn Analysis> = match lib.split_sentences {
         SentenceSplitMode::Only => Box::new(SplitSentencesOnly::new(&lib.dict)),
@@ -140,28 +154,38 @@ fn analyze_single (
         }),
     };
 
-    inputs.into_iter().map(| text | {
-        let lines: Vec<&str> = text
+    let total_input_len: usize = inputs.iter().map(|s| s.len()).sum();
+    let mut writer: Vec<u8> = Vec::with_capacity(estimate_len(total_input_len, &lib));
+    writer.push(b'[');
+    inputs.into_iter().for_each(| text | {
+        let lines: Vec<_> = text
             .split(|c| c == '\n' || c == '\r')
             .filter(|s| !s.is_empty())
             .collect();
-        let mut writer: Vec<String> = Vec::new();
 
         // tokenize and output results
-        for no_eol in lines.iter() {
+        writer.push(b'[');
+        for no_eol in lines.into_iter() {
             analyzer.analyze(no_eol, &mut writer);
+            writer.push(b',');
         }
+        if writer.last() == Some(&b',') { writer.pop(); }
+        writer.push(b']');
+        writer.push(b',');
 
         //format!("[{}]", writer.join(","))
-        writer
-    }).collect()
+    });
+    if writer.last() == Some(&b',') { writer.pop(); }
+    writer.push(b']');
+    writer
 }
 
 fn analyze_multi(
-    inputs: Vec<String>,
+    inputs: Vec<&str>,
     lib: &SudachiLib
-) -> Vec<Vec<String>> {
-    inputs.into_par_iter().map_init(
+) -> Vec<u8> {
+    let total_input_len: usize = inputs.iter().map(|s| s.len()).sum();
+    let results: Vec<Vec<u8>> = inputs.into_par_iter().map_init(
         || {
             // --- 初期化クロージャ (スレッドごとに1回実行) ---
             let detail = Cli { wakati: lib.wakati, print_all: lib.print_all };
@@ -179,20 +203,34 @@ fn analyze_multi(
             analyzer
         },
         |analyzer, text| {
-            let lines: Vec<&str> = text
+            let lines: Vec<_> = text
                 .split(|c| c == '\n' || c == '\r')
                 .filter(|s| !s.is_empty())
                 .collect();
-            let mut writer: Vec<String> = Vec::new();
 
+            let mut local_writer = Vec::with_capacity(estimate_len(text.len(), &lib));
             // tokenize and output results
-            for no_eol in lines.iter() {
-                analyzer.analyze(no_eol, &mut writer);
+            local_writer.push(b'[');
+            for no_eol in lines.into_iter() {
+                analyzer.analyze(no_eol, &mut local_writer);
+                local_writer.push(b',');
             }
-
+            if local_writer.last() == Some(&b',') { local_writer.pop(); }
+            local_writer.push(b']');
+            local_writer.push(b',');
+            local_writer
             //format!("[{}]", writer.join(","))
-            writer
-    }).collect()
+    }).collect();
+
+    let mut writer = Vec::with_capacity(estimate_len(total_input_len, &lib));
+    writer.push(b'[');
+    for res in results.iter() {
+        //if i > 0 { writer.push(b','); }
+        writer.extend_from_slice(res);
+    }
+    if writer.last() == Some(&b',') { writer.pop(); }
+    writer.push(b']');
+    writer
 }
 
 /// メインの解析関数
@@ -204,21 +242,21 @@ pub extern "C" fn analyze(
     out_len: *mut usize
   ) -> *mut c_char {
     let lib = unsafe { &mut *ptr };
-    let input_str = unsafe { CStr::from_ptr(input_json).to_str().unwrap() };
+    let input_str = unsafe { CStr::from_ptr(input_json).to_bytes() };
     if input_str.is_empty() {return std::ptr::null_mut()};
-    let inputs: Vec<String> = serde_json::from_str(input_str).unwrap_or_default();
+    let inputs: Vec<&str> = serde_json::from_slice(input_str).unwrap_or_default();
 
-    let all_results_arr = if lib.multi_thread {
+    let all_results = if lib.multi_thread {
         analyze_multi(inputs, lib)
     } else {
         analyze_single(inputs, lib)
     };
 
-    let all_results:Vec<_> = all_results_arr.into_iter().map(|arr| {
-        format!("[{}]", arr.join(","))
-    }).collect();
-    let result_json = format!("[{}]", &all_results.join(","));
-    let res_ptr = CString::new(result_json).unwrap().into_raw();
+    //let all_results:Vec<_> = all_results_arr.into_iter().map(|arr| {
+    //    format!("[{}]", arr.join(","))
+    //}).collect();
+    //let result_json = format!("[{}]", &all_results.join(","));
+    let res_ptr = CString::new(all_results).unwrap().into_raw();
 
     // 文字列の長さを計算して、out_len が指す先に書き込む
     unsafe {
