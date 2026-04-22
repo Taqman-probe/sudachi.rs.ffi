@@ -21,7 +21,9 @@
 
 ## 🚀 セットアップ
 
-### 1. Rust 側ビルド
+### 1. Rust 側ビルド (非必須)
+
+**Releasesにあるダイナミックリンクライブラリをダウンロードして使用することができます。**
 
 ```bash
 cargo build --release
@@ -37,15 +39,33 @@ target/release/sudachi_ffi.dll
 
 ---
 
-### 2. Sudachi 辞書の準備
+### 2. Sudachi 設定ファイルと辞書の準備 (必須)
 
-Sudachi の設定ファイル (`sudachi.json`) と辞書を用意してください。
+* Sudachi の設定ファイル (`sudachi.json`, `char.def`) と辞書を用意してください。
+
+  当リポジトリにデフォルト設定の `sudachi_default.json` とプラグイン (後述) を指定した `sudachi.json` を用意しています。
+
+* `char.def` は以下からダウンロードしてください。
+
+  [WorksApplications/Sudachi](https://github.com/WorksApplications/Sudachi/blob/develop/src/main/resources/char.def)
+
+* 辞書は以下からダウンロードしてください：
+
+  [SudachiDict](http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/)
+  または
+  [WorksApplications/SudachiDict](https://github.com/WorksApplications/SudachiDict)
+
+  - 辞書ファイルいずれか (small / core / full)
+
 
 ---
 
 ### 3. 使用例 (TypeScript & Deno から利用)
 
+* TypeScript
 ```ts
+import { Sudachi } from "./mod.ts";
+
 let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
 if (Deno.build.os === "windows") {
   configPath = configPath.slice(1);
@@ -69,6 +89,7 @@ try {
 }
 ```
 
+* Bash
 ```sh
 mkdir -p sudachi-demo/resources && mkdir -p sudachi-demo/deno && cd sudachi-demo
 # Download exsample
@@ -76,6 +97,8 @@ curl -L https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/
 curl -L https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/exsample.ts -o deno/exsample.ts
 curl -L https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/resources/sudachi_default.json -o resources/sudachi_default.json
 curl -L https://github.com/Taqman-probe/sudachi.rs.ffi/releases/download/v0.6.11-1/libsudachi_ffi.so -o resources/libsudachi_ffi.so
+# Download char.def
+curl -L "https://raw.githubusercontent.com/WorksApplications/Sudachi/refs/heads/develop/src/main/resources/char.def" -o "resources/char.def"
 # Download Dictionary
 curl -LO http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip
 unzip sudachi-dictionary-latest-core.zip
@@ -86,15 +109,18 @@ export SUDACHI_FFI=./resources/libsudachi_ffi.so
 deno run --allow-ffi --allow-read --allow-env deno/exsample.ts
 ```
 
+* PowerShell
 ```powershell
 New-Item -ItemType Directory -Force -Path "sudachi-demo\deno"
 New-Item -ItemType Directory -Force -Path "sudachi-demo\resources"
 Set-Location "sudachi-demo"
 # Download exsample
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/mod.ts" -OutFile "mod.ts"
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/exsample.ts" -OutFile "exsample.ts"
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/resources/sudachi_default.json" -OutFile "resources/config_default.json"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/mod.ts" -OutFile "deno/mod.ts"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/deno/exsample.ts" -OutFile "deno/exsample.ts"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Taqman-probe/sudachi.rs.ffi/main/resources/sudachi_default.json" -OutFile "resources/sudachi_default.json"
 Invoke-WebRequest -Uri "https://github.com/Taqman-probe/sudachi.rs.ffi/releases/download/v0.6.11-1/sudachi_ffi.dll"-OutFile "resources/sudachi_ffi.dll"
+# Download char.def
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/WorksApplications/Sudachi/refs/heads/develop/src/main/resources/char.def" -Outfile "resources/char.def"
 # Download Dictionary
 Invoke-WebRequest -Uri "http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip" -OutFile "sudachi-dictionary-latest-core.zip"
 Expand-Archive -Path "sudachi-dictionary-latest-core.zip" -DestinationPath "."
@@ -102,7 +128,7 @@ Move-Item -Path "sudachi-dictionary-*/system_core.dic" -Destination "resources"
 Remove-Item -Path "sudachi-dictionary-latest-core.zip", "sudachi-dictionary-*" -Recurse
 # Execute
 $env:SUDACHI_FFI = "./resources/sudachi_ffi.dll"
-deno run --allow-ffi --allow-read --allow-env exsample.ts
+deno run --allow-ffi --allow-read --allow-env deno/exsample.ts
 ```
 
 #### 出力
@@ -210,16 +236,6 @@ Sudachi の解析モード
 
 * Sudachi 辞書が必要です
 * Windows / Linux / Mac でビルド成果物が異なります
-
-### Sudachi 辞書の準備 (必須)
-
-以下からダウンロードしてください：
-
-[SudachiDict](http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/)
-または
-[WorksApplications/SudachiDict](https://github.com/WorksApplications/SudachiDict)
-
-- 辞書ファイルいずれか (small / core / full)
 
 ### プラグインについて
 

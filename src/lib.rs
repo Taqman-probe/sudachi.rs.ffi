@@ -130,7 +130,7 @@ fn estimate_len(
     lib: &SudachiLib
 ) -> usize {
     if lib.wakati {
-        (input_len as f64 * 1.5 as f64).round() as usize
+        input_len *2
     } else if lib.print_all {
         input_len * 75
     } else {
@@ -219,7 +219,6 @@ fn analyze_multi(
             local_writer.push(b']');
             local_writer.push(b',');
             local_writer
-            //format!("[{}]", writer.join(","))
     }).collect();
 
     let mut writer = Vec::with_capacity(estimate_len(total_input_len, &lib));
@@ -252,10 +251,6 @@ pub extern "C" fn analyze(
         analyze_single(inputs, lib)
     };
 
-    //let all_results:Vec<_> = all_results_arr.into_iter().map(|arr| {
-    //    format!("[{}]", arr.join(","))
-    //}).collect();
-    //let result_json = format!("[{}]", &all_results.join(","));
     let res_ptr = CString::new(all_results).unwrap().into_raw();
 
     // 文字列の長さを計算して、out_len が指す先に書き込む

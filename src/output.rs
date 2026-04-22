@@ -62,7 +62,7 @@ impl Simple {
 #[derive(serde::Serialize)]
 struct MorphemeJson<'a> {
     surface: &'a str,
-    poses: Vec<&'a str>, // ここは Vec になりますが、要素は参照です
+    poses: Vec<&'a str>,
     normalized_form: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     dictionary_form: Option<&'a str>,
@@ -84,7 +84,6 @@ impl<T: DictionaryAccess> SudachiOutput<T> for Simple {
                     reading_form: if self.print_all { Some(m.dictionary_form()) } else { None },
                     is_oov: if self.print_all && m.is_oov() { Some(true) } else { None },
                 };
-                //writer.push(serde_json::to_string(&entry).unwrap());
                 serde_json::to_writer(&mut *writer, &entry).unwrap();
                 writer.push(b',');
             }
