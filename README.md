@@ -60,7 +60,9 @@ target/release/sudachi_ffi.dll
 
 ---
 
-### 3. 使用例 (TypeScript & Deno から利用)
+### 3. 使用例
+
+#### TypeScript & Deno から利用
 
 * TypeScript
 ```ts
@@ -88,6 +90,8 @@ try {
   sudachi.dylibInstance.close();
 }
 ```
+
+#### コピペで試す (Denoは別途インストールが必要)
 
 * Bash
 ```sh
