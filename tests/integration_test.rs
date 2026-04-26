@@ -34,3 +34,44 @@ fn test_full_lifecycle() {
         sudachi_ffi::free_sudachi(lib_ptr);
     }
 }
+
+#[test]
+fn test_raw_full_lifecycle() {
+    for is_multi in [0, 1] {
+        // 1. 初期化 (pub extern "C" fn init)
+        let lib_ptr = sudachi_ffi::init(
+            CString::new("./resources/sudachi.json").unwrap().as_ptr(),
+            2,           // mode_val (Mode C)
+            1,           // is_wakati (true)
+            0,           // is_print_all (false)
+            0,           // split_sentences_val (Default)
+            ptr::null(),  // exclude_pos_json
+            is_multi, // is_multi (false)
+        );
+        assert!(!lib_ptr.is_null());
+
+        let text_vec = vec!["プロジェクトに関するお問い合わせ。"];
+        let mut input_data = Vec::new();
+        for text in text_vec {
+            let bytes = text.as_bytes();
+            let len = bytes.len() as u32;
+            input_data.extend_from_slice(&len.to_le_bytes()); // 長さをリトルエンディアンで追加
+            input_data.extend_from_slice(bytes);             // テキスト本体
+        }
+
+        let mut out_len: usize = 0;
+        let res_ptr = sudachi_ffi::analyze_raw(lib_ptr, input_data.as_ptr(), input_data.len(), &mut out_len);
+        
+        assert!(!res_ptr.is_null());
+
+        let result_cstr = unsafe { CStr::from_ptr(res_ptr) };
+        let actual_bytes_with_nul = result_cstr.to_bytes_with_nul().len();
+        assert_eq!(out_len, actual_bytes_with_nul, "out_len should include NUL terminator");
+
+        let result_str = result_cstr.to_str().unwrap();
+        assert!(result_str == "プロジェクト に 関する お 問い合わせ 。\nEOS\n");
+
+        sudachi_ffi::free_string(res_ptr);
+        sudachi_ffi::free_sudachi(lib_ptr);
+    }
+}

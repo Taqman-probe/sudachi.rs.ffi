@@ -60,6 +60,33 @@ impl<T: DictionaryAccess> SudachiOutput<T> for WakachiJSON {
     }
 }
 
+pub struct WakachiRaw {
+    exclude_pos: Vec<String>,
+}
+
+impl WakachiRaw {
+    pub fn new(exclude_pos: Vec<String>) -> WakachiRaw {
+        WakachiRaw { exclude_pos }
+    }
+}
+
+impl<T: DictionaryAccess> SudachiOutput<T> for WakachiRaw {
+    fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()> {
+        if morphemes.is_empty() {
+            writer.push(b'\n');
+            return Ok(());
+        }
+        for m in morphemes.iter() {
+            if !self.exclude_pos.contains(&m.part_of_speech()[0]) {
+                writer.extend_from_slice(m.surface().as_bytes());
+                writer.push(b' ');
+            }
+        }
+        if writer.last() == Some(&b' ') { writer.pop(); }
+        Ok(())
+    }
+}
+
 pub struct SimpleJSON {
     print_all: bool,
     exclude_pos: Vec<String>,
@@ -88,6 +115,53 @@ impl<T: DictionaryAccess> SudachiOutput<T> for SimpleJSON {
             }
         }
         if writer.last() == Some(&b',') { writer.pop(); }
+        Ok(())
+    }
+}
+pub struct SimpleRaw {
+    print_all: bool,
+    exclude_pos: Vec<String>,
+}
+
+impl SimpleRaw {
+    pub fn new(print_all: bool, exclude_pos: Vec<String>) -> SimpleRaw {
+        SimpleRaw { print_all, exclude_pos }
+    }
+}
+
+impl<T: DictionaryAccess> SudachiOutput<T> for SimpleRaw {
+    fn write(&self, writer: &mut Vec<u8>, morphemes: &MorphemeList<T>) -> SudachiResult<()> {
+        for m in morphemes.iter() {
+            if !self.exclude_pos.contains(&m.part_of_speech()[0]) {
+                writer.extend_from_slice(m.surface().as_bytes());
+                writer.push(b'\t');
+                let all_pos = m.part_of_speech();
+                for (idx, pos) in all_pos.iter().enumerate() {
+                    writer.extend_from_slice(pos.as_bytes());
+                    if idx + 1 != all_pos.len() {
+                        writer.push(b',');
+                    }
+                }
+                writer.push(b'\t');
+                writer.extend_from_slice(m.normalized_form().as_bytes());
+
+                if self.print_all {
+                    writer.push(b'\t');
+                    writer.extend_from_slice(m.dictionary_form().as_bytes());
+                    writer.push(b'\t');
+                    writer.extend_from_slice(m.reading_form().as_bytes());
+                    writer.push(b'\t');
+                    writer.extend_from_slice(format!("{}", m.dictionary_id()).as_bytes());
+                    writer.push(b'\t');
+                    writer.extend_from_slice(format!("{:?}", m.synonym_group_ids()).as_bytes());
+
+                    if m.is_oov() {
+                        writer.extend_from_slice(b"\t(OOV)");
+                    }
+                }
+                writer.push(b'\n');
+            }
+        }
         Ok(())
     }
 }

@@ -22,7 +22,7 @@ use sudachi::prelude::MorphemeList;
 use sudachi::sentence_splitter::{SentenceSplitter, SplitSentences};
 
 pub trait Analysis {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>);
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>, method: &str);
 }
 
 pub struct SplitSentencesOnly<'a> {
@@ -37,12 +37,19 @@ impl<'a> SplitSentencesOnly<'a> {
 }
 
 impl<'a> Analysis for SplitSentencesOnly<'a> {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
-        for (_, sent) in self.splitter.split(input) {
-            serde_json::to_writer(&mut *writer, &sent).unwrap();
-            writer.push(b',');
-        };
-        if writer.last() == Some(&b',') { writer.pop(); }
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>, method: &str) {
+        if method == "JSON" {
+            for (_, sent) in self.splitter.split(input) {
+                serde_json::to_writer(&mut *writer, &sent).unwrap();
+                writer.push(b',');
+            }
+            if writer.last() == Some(&b',') { writer.pop(); }
+        } else {
+            for (_, sent) in self.splitter.split(input) {
+                writer.extend_from_slice(sent.as_bytes());
+                writer.push(b'\n');
+            }
+        }
     }
 }
 
@@ -63,7 +70,7 @@ impl<D: DictionaryAccess + Clone, O: SudachiOutput<D>> AnalyzeNonSplitted<D, O> 
 }
 
 impl<D: DictionaryAccess, O: SudachiOutput<D>> Analysis for AnalyzeNonSplitted<D, O> {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>, _method: &str) {
         self.analyzer.reset().push_str(input);
         self.analyzer
             .do_tokenize()
@@ -92,11 +99,11 @@ impl<'a, D: DictionaryAccess + 'a, O: SudachiOutput<&'a D>> AnalyzeSplitted<'a, 
 }
 
 impl<'a, D: DictionaryAccess + 'a, O: SudachiOutput<&'a D>> Analysis for AnalyzeSplitted<'a, D, O> {
-    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>) {
+    fn analyze(&mut self, input: &str, writer: &mut Vec<u8>, method: &str) {
         for (_, sent) in self.splitter.split(input) {
-            self.inner.analyze(sent, writer);
-            writer.push(b',');
+            self.inner.analyze(sent, writer, method);
+            if method == "JSON" { writer.push(b','); }
         }
-        if writer.last() == Some(&b',') { writer.pop(); }
+        if method == "JSON" && writer.last() == Some(&b',') { writer.pop(); }
     }
 }

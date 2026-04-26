@@ -20,6 +20,10 @@ export class Sudachi {
       parameters: ["pointer", "buffer", "buffer"],
       result: "pointer",
     },
+    analyze_raw: {
+      parameters: ["pointer", "buffer", "u64", "buffer"],
+      result: "pointer",
+    },
     free_string: {
       parameters: ["pointer"],
       result: "void",
@@ -63,7 +67,7 @@ export class Sudachi {
     }
   }
 
-  // Cから戻ってきたJSON文字列を読み取って解放するヘルパー
+  // Cから戻ってきた文字列を読み取って解放するヘルパー
   readAndFreeString(ptr: Deno.PointerValue, len: number): string | null {
     if (ptr === null || len === 0) return null;
     
@@ -79,13 +83,32 @@ export class Sudachi {
   }
 
   analyze(queries: string[]): string | null {
-    const lenBuffer = new BigUint64Array(1); //確保するべき長さを格納させる
     const jsonInput = JSON.stringify(queries);
+    const lenBuffer = new BigUint64Array(1); //確保するべき長さを格納させる
     const resultPtr = this.dylib.symbols.analyze(this.ptr, this.encode(jsonInput), lenBuffer);
 
     const actualLen = Number(lenBuffer[0]);
     const jsonStr = this.readAndFreeString(resultPtr, actualLen);
-    return jsonStr ? jsonStr : null;
+    return jsonStr || null;
+  }
+
+  analyzeRaw(queries: string[]): string | null {
+    const maxPossibleSize = queries.reduce((acc, s) => acc + 4 + (s.length * 4), 0);
+    const buffer = new Uint8Array(maxPossibleSize);
+    const view = new DataView(buffer.buffer);
+    const encoder = new TextEncoder();
+
+    let offset = 0;
+    for (const str of queries) {
+      // Back-patching1: 長さの値4バイト分は空にしたまま先に文字列をエンコードしながら埋める
+      const result = encoder.encodeInto(str, buffer.subarray(offset + 4));
+      // Back-patching2: 実際に書き込まれたバイト数をoffset先頭に遡って長さ情報として記録
+      view.setUint32(offset, result.written, true);
+      offset += 4 + result.written;
+    }
+    const lenBuffer = new BigUint64Array(1); //確保するべき長さを格納させる
+    const resultPtr = this.dylib.symbols.analyze_raw(this.ptr, buffer.subarray(0, offset), BigInt(offset), lenBuffer);
+    return this.readAndFreeString(resultPtr, Number(lenBuffer[0])) || null;
   }
 
   close() {

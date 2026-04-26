@@ -16,6 +16,7 @@
 * Rust 実装による高速処理
 * FFI 経由で 各言語から利用可能 (TypeScript / Deno サンプルあり)
 * バッチ処理前提 (JSONで["文字列1", 文字列2]の文字列配列を渡す設計)
+* **2つの解析メソッド**: 汎用的な `analyze` (JSON) と、メモリ効率を最適化した `analyze_raw` (Binary) を提供
 
 ---
 
@@ -83,7 +84,7 @@ const sudachi = new Sudachi ({
 });
 
 try {
-  const result = sudachi.analyze(["今日はいい天気です。"]);
+  const result = sudachi.analyze(["今日はいい天気です。"]); // JSON形式
   console.log(JSON.parse(result || "{}"));
 } finally {
   sudachi.close();
@@ -93,7 +94,7 @@ try {
 
 #### コピペで試す (Denoは別途インストールが必要)
 
-* Bash
+* Bash (Macの場合は.soを.dylibに変更してください。)
 ```sh
 mkdir -p sudachi-demo/resources && mkdir -p sudachi-demo/deno && cd sudachi-demo
 # Download exsample
@@ -104,7 +105,7 @@ curl -L https://github.com/Taqman-probe/sudachi.rs.ffi/releases/download/v0.6.11
 # Download char.def
 curl -L "https://raw.githubusercontent.com/WorksApplications/Sudachi/refs/heads/develop/src/main/resources/char.def" -o "resources/char.def"
 # Download Dictionary
-curl -LO http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip
+curl -LO https://d2ej7fkh96fzlu.cloudfront.net/sudachidict/sudachi-dictionary-latest-core.zip
 unzip sudachi-dictionary-latest-core.zip
 mv sudachi-dictionary-*/system_core.dic resources/
 rm -rf sudachi-dictionary-latest-core.zip sudachi-dictionary-*/
@@ -126,7 +127,7 @@ Invoke-WebRequest -Uri "https://github.com/Taqman-probe/sudachi.rs.ffi/releases/
 # Download char.def
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/WorksApplications/Sudachi/refs/heads/develop/src/main/resources/char.def" -Outfile "resources/char.def"
 # Download Dictionary
-Invoke-WebRequest -Uri "http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip" -OutFile "sudachi-dictionary-latest-core.zip"
+Invoke-WebRequest -Uri "https://d2ej7fkh96fzlu.cloudfront.net/sudachidict/sudachi-dictionary-latest-core.zip" -OutFile "sudachi-dictionary-latest-core.zip"
 Expand-Archive -Path "sudachi-dictionary-latest-core.zip" -DestinationPath "."
 Move-Item -Path "sudachi-dictionary-*/system_core.dic" -Destination "resources"
 Remove-Item -Path "sudachi-dictionary-latest-core.zip", "sudachi-dictionary-*" -Recurse
@@ -177,6 +178,38 @@ deno run --allow-ffi --allow-read --allow-env deno/exsample.ts
     }
   ]
 ]
+```
+
+### 解析メソッドの使い分け
+
+本ライブラリは、用途に応じて2つのインターフェースを提供しています。
+
+| メソッド     | 入力形式 | 特徴 |
+| -- | ------ | -------- |
+| analyze     | JSON    | 扱いやすく汎用的。内部でエスケープ処理のためメモリ再確保が発生します。 |
+| analyze_raw | Binary  | パースは面倒だけど早い。長さ情報を付与したバイナリを直接渡すため、メモリ効率が最高です。 |
+
+#### analyze_raw の使用例 (Deno)
+```ts
+const rawResult = sudachi.analyzeRaw(["今日は来る？", "明日は行く。"]);
+console.log(rawResult);
+// wakati: true 時
+// 今日 は 来る ？
+// 明日 は 行く 。
+// EOS
+
+// wakati: false, print_all: true 時 (入力文字列に対応する区切りは改行2回)
+// 今日    名詞,普通名詞,副詞可能,*,*,*    今日    今日    キョウ  0       [981]
+// は      助詞,係助詞,*,*,*,*     は      は      ハ      0       []
+// 来る    動詞,非自立可能,*,*,カ行変格,終止形-一般        来る    来る    クル    0       []
+// ？      補助記号,句点,*,*,*,*   ?       ?       ?       0       []
+//
+// 明日    名詞,普通名詞,副詞可能,*,*,*    明日    明日    アス    0       [13183]
+// は      助詞,係助詞,*,*,*,*     は      は      ハ      0       []
+// 行く    動詞,非自立可能,*,*,五段-カ行,終止形-一般       行く    行く    イク    0       []
+// 。      補助記号,句点,*,*,*,*   。      。      。      0       []
+//
+//EOS
 ```
 
 ---
@@ -231,7 +264,7 @@ Sudachi の解析モード
 
 ### `multi`
 
-* `true`: マルチスレッド、環境変数: RAYON_NUM_THREADS によりスレッド数を指定可能
+* `true`: スレッド数制御: **環境変数 RAYON_NUM_THREADS** により指定可能です（例: export RAYON_NUM_THREADS=4）。指定しない場合は全論理プロセッサを使用します
 * `false`: シングルスレッド
 
 ---
@@ -275,30 +308,42 @@ cargo build --release -p join_katakana_oov
 ## 🚀 性能検証
 
 [Livedoor コーパス](https://www.rondhuit.com/download.html) (約 25MB / 9カテゴリ) を使用したベンチマーク結果です。
-SudachiPy (Python) と比較して、本ライブラリ (Deno FFI via Rust) は **約5〜7倍高速** に動作します。
+SudachiPy (Python) と比較して、本ライブラリ (Deno FFI via Rust) は最速のマルチスレッドRawスタイルで **約4.5倍高速** に動作します。
 
-CPU | 13th Gen Intel(R) Core(TM) i7-1355U
+| benchmark            | time/iter (avg) |        iter/s |      (min … max)      |      p75 |      p99 |     p995 |
+| -------------------- | --------------- | ------------- | --------------------- | -------- | -------- | -------- |
+| Multi thread JSON    |           3.6 s |           0.3 | (   3.3 s …    4.1 s) |    3.8 s |    4.1 s |    4.1 s |
+| Single thread JSON   |           9.6 s |           0.1 | (   8.9 s …   11.3 s) |   10.3 s |   11.3 s |   11.3 s |
+| Multi thread Raw     |           2.3 s |           0.4 | (   2.0 s …    2.5 s) |    2.5 s |    2.5 s |    2.5 s |
+| Single thread Raw    |           8.1 s |           0.1 | (   7.9 s …    8.7 s) |    8.2 s |    8.7 s |    8.7 s |
+| SudachiPy (Python) | 10.3 s         | 0.1 | - | - | - | - |
 
-Runtime | Deno 2.7.9 (x86_64-pc-windows-msvc)
-
-| benchmark       | time/iter (avg) |        iter/s |      (min … max)      |      p75 |      p99 |     p995 |
-| --------------- | --------------- | ------------- | --------------------- | -------- | -------- | -------- |
-| FFI Multi thread |           1.5 s |           0.7 | (   1.5 s …    1.6 s) |    1.5 s |    1.6 s |    1.6 s |
-| FFI Single thread |           1.5 s |           0.7 | (   1.5 s …    1.5 s) |    1.5 s |    1.5 s |    1.5 s |
-| SudachiPy (Python) | 10.3 s         | 0.097 | - | - | - | - |
-
-* **テスト環境:** [CPU | 13th Gen Intel(R) Core(TM) i7-1355U | Runtime | Deno 2.7.9 (x86_64-pc-windows-msvc)]
-* **条件:** SplitMode: C, Wakati: ON, Single Thread
-* **注記1:** Deno側のタイムには `JSON.parse` によるオブジェクト変換コストが含まれています。Rust内部の純粋な解析速度はさらに高速です。
+* **テスト環境:** [CPU | 13th Gen Intel(R) Core(TM) i7-1355U (10 Cores / 12 Threads) | Runtime | Deno 2.7.9 (x86_64-pc-windows-msvc)]
+* **条件:** SplitMode: C, Wakati: ON
+* **注記1:** Deno側は実用面ではオブジェクトの変換が必須なため、変換コストを含んだ時間となっています。Rust内部の純粋な解析速度はさらに高速です。
 * **注記2:** SudachiPyには一度に処理できる入力サイズに制限 (約49KB) があるため、Denoスクリプトでは文字列配列を一括で処理しているのに対し、Pythonスクリプトでは記事単位でループ処理を行っています。
 
-### マルチスレッドとデータ量について
+### マルチスレッドとデータ形式について
+今回のベンチマーク結果から得られた主要な知見を以下にまとめます。
 
-現在の Rust 実装は rayon による並列処理に対応していますが、25MB 程度のデータ量では Single / Multi thread 間に大きな差が出出ませんでした。(むしろ Multi thread のほうがわずかに遅い。。。)
+1. Python (SudachiPy) との比較
+ * オーバーヘッドの抑制: 1件ごとにFFIを呼び出すのではなく、まとめてデータを転送することで、言語境界を越える際のコストを最小化しています。
+  
+  * バッチ処理の優位性: 大量データの一括処理において、この「まとめてRustに投げる」手法が SudachiPy の逐次処理よりもわずかながら効率的であることが確認されました。
 
-CPU 使用率を見ていると、CPU 全体を使い切る前に処理が終了しており、スレッドの立ち上げ、データの分割といったオーバーヘッドの分だけ余計なコストがかかっているようです。
+2. データ転送形式によるパフォーマンス差 (JSON vs Raw)
+  Rust側でのメモリ挙動の差が、明確なパフォーマンス差として現れています。
 
-より大規模なデータを一度に処理しようとすると、今度は JavaScript ランタイム（V8）のメモリ制限により解析結果を受け取るときにエラーになります。(分かち書きモードでもクォーテーションとカンマが入るため元のテキストデータの2倍程度のメモリを消費します。)
+  * JSON形式: Rust側でJSONをパースする際、改行や特殊文字のエスケープ解除に伴い、内部で**メモリの再確保** が発生します。これがボトルネックとなり、Raw形式より速度が低下します。
+
+  * Raw形式: 長さ情報を付与したバイナリデータを直接渡すことで、Rust側でのメモリ再確保を最小限に抑えています。転送フォーマットを最適化する重要性が示されました。
+
+3. マルチスレッドによる圧倒的な高速化
+  rayon を利用したマルチスレッド実行は、シングルスレッドに対して圧倒的なアドバンテージがあります。
+
+  * 並列化の恩恵: 物理コア・論理プロセッサをフル活用することで、シングルスレッド実行時の数倍のスループットを達成しました。
+
+  * 安定性: CPU (i7-1355U) の特性上、シングルスレッドではOSのスケジューリングによる変動を受けやすいですが、マルチスレッドではリソースを使い切ることで高いパフォーマンスを安定して維持できます。
 
 ---
 

@@ -58,7 +58,7 @@ const baseConfig = {
   multi: false,
 };
 
-Deno.bench("Multi thread", () => {
+Deno.bench("Multi thread JSON", () => {
   const sudachi = new Sudachi ({...baseConfig, multi: true});
   try {
     JSON.parse(sudachi.analyze(inputs)||"{}");
@@ -67,10 +67,52 @@ Deno.bench("Multi thread", () => {
     sudachi.dylibInstance.close();
   }
 });
-Deno.bench("Single thread", () => {
+Deno.bench("Single thread JSON", () => {
   const sudachi = new Sudachi ({...baseConfig});
   try {
     JSON.parse(sudachi.analyze(inputs) || "{}");
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+Deno.bench("Multi thread Raw", () => {
+  const sudachi = new Sudachi ({...baseConfig, multi: true});
+  try {
+    const results: Array<Array<string>> = [];
+    let str = "";
+    const rawString = sudachi.analyzeRaw(inputs) || "";
+    for (const char of rawString) {
+      if (char === "\n") {
+        if (str !== "EOS") {
+          results.push(str.split(" "));
+        }
+        str = "";
+      } else {
+        str += char;
+      }
+    }
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+Deno.bench("Single thread Raw", () => {
+  const sudachi = new Sudachi ({...baseConfig});
+  try {
+    const results: Array<Array<string>> = [];
+    let str = "";
+    const rawString = sudachi.analyzeRaw(inputs) || "";
+    for (const char of rawString) {
+      if (char === "\n") {
+        if (str !== "EOS") {
+          results.push(str.split(" "));
+        }
+        str = "";
+      } else {
+        str += char;
+      }
+    }
   } finally {
     sudachi.close();
     sudachi.dylibInstance.close();

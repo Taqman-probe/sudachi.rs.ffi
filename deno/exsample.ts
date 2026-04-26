@@ -10,7 +10,7 @@ const sudachi = new Sudachi ({
   wakati: false,      // 分かち書き
   printAll: true,   // 詳細情報出力
   splitSentences: 0, // default:0 / only:1 / none:2
-  excludePos: ["記号", "助詞"], // 品詞除外設定
+  excludePos: ["補助記号", "助詞"], // 品詞除外設定
   multi: false // マルチスレッド
 });
 

@@ -28,6 +28,8 @@ jobs:
 
       - name: Build Rust Library
         run: cargo build --release
+        env:
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=$HOME=~"
 
       # ビルドされたバイナリを Release にアップロード
       - name: Upload Release Asset

@@ -13,12 +13,12 @@ use analysis::{Analysis, AnalyzeNonSplitted, AnalyzeSplitted, SplitSentencesOnly
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub enum SentenceSplitMode {
-    /// Do both sentence splitting and analysis
+    // Do both sentence splitting and analysis
     #[default]
     Default,
-    /// Do only sentence splitting and not analysis
+    // Do only sentence splitting and not analysis
     Only,
-    /// Do only analysis without sentence splitting
+    // Do only analysis without sentence splitting
     None,
 }
 
@@ -40,17 +40,57 @@ struct Cli {
     wakati: bool,
 }
 
-macro_rules! with_output {
-    ($cli: expr, $exclude_pos: expr, $f: expr) => {
-        if $cli.wakati {
-            Box::new($f(output::WakachiJSON::new($exclude_pos)))
+struct OutputHelper {
+    is_json: bool,
+}
+
+impl OutputHelper {
+    fn new(method: &str) -> Self {
+        Self { is_json: method == "JSON" }
+    }
+    fn write_start(&self, w: &mut Vec<u8>) {
+        if self.is_json { w.push(b'['); }
+    }
+    fn write_end(&self, w: &mut Vec<u8>) {
+        if self.is_json {
+            // 直前がカンマなら消してから閉じる（空振りの掃除）
+            if w.last() == Some(&b',') { w.pop(); }
+            w.push(b']');
+        }
+    }
+    fn write_separator(&self, w: &mut Vec<u8>) {
+        if self.is_json {
+            w.push(b',');
+        }
+    }
+    fn write_chunk_separator(&self, w: &mut Vec<u8>) {
+        if self.is_json {
+            w.push(b',');
         } else {
-            Box::new($f(output::SimpleJSON::new($cli.print_all, $exclude_pos)))
+            w.push(b'\n');
+        }
+    }
+}
+
+macro_rules! with_output {
+    ($cli: expr, $exclude_pos: expr, $method: expr, $f: expr) => {
+        if $cli.wakati {
+            match $method {
+                "JSON" => Box::new($f(output::WakachiJSON::new($exclude_pos))),
+                "Raw" => Box::new($f(output::WakachiRaw::new($exclude_pos))),
+                _ => panic!("Invalid method"),
+             }
+        } else {
+            match $method {
+                "JSON" => Box::new($f(output::SimpleJSON::new($cli.print_all, $exclude_pos))),
+                "Raw" => Box::new($f(output::SimpleRaw::new($cli.print_all, $exclude_pos))),
+                _ => panic!("Invalid method"),
+            }
         }
     };
 }
 
-/// 解析結果を保持する構造体
+// 解析結果を保持する構造体
 #[repr(C)]
 pub struct SudachiLib {
     path_buf: Option<PathBuf>,
@@ -63,7 +103,7 @@ pub struct SudachiLib {
     multi_thread: bool, // マルチスレッド化
 }
 
-/// 辞書の初期化
+///辞書の初期化
 #[unsafe(no_mangle)]
 pub extern "C" fn init(
     config_path: *const c_char,
@@ -127,36 +167,53 @@ pub extern "C" fn init(
 
 fn estimate_len(
     input_len: usize,
-    lib: &SudachiLib
+    lib: &SudachiLib,
+    method: &str,
 ) -> usize {
-    if lib.wakati {
-        input_len *2
-    } else if lib.print_all {
-        input_len * 75
-    } else {
-        input_len * 60
+    match method {
+        "JSON" => {
+            if lib.wakati {
+                input_len * 4
+            } else if lib.print_all {
+                input_len * 75
+            } else {
+                input_len * 60
+            }
+        },
+        "Raw" => {
+            if lib.wakati {
+                input_len * 4
+            } else if lib.print_all {
+                input_len * 30
+            } else {
+                input_len * 25
+            }
+        },
+        _ => input_len
     }
 }
 
 
 fn analyze_single (
     inputs: Vec<&str>,
-    lib: &SudachiLib
+    lib: &SudachiLib,
+    method: &str
 ) -> Vec<u8> {
+    let output_helper = OutputHelper::new(method);
     let detail = Cli { wakati: lib.wakati, print_all: lib.print_all };
     let mut analyzer: Box<dyn Analysis> = match lib.split_sentences {
         SentenceSplitMode::Only => Box::new(SplitSentencesOnly::new(&lib.dict)),
-        SentenceSplitMode::Default => with_output!(detail, lib.exclude_pos.clone(), |o| {
+        SentenceSplitMode::Default => with_output!(detail, lib.exclude_pos.clone(), method, |o| {
             AnalyzeSplitted::new(o, &lib.dict, lib.mode, false)
         }),
-        SentenceSplitMode::None => with_output!(detail, lib.exclude_pos.clone(), |o| {
+        SentenceSplitMode::None => with_output!(detail, lib.exclude_pos.clone(), method, |o| {
             AnalyzeNonSplitted::new(o, &lib.dict, lib.mode, false)
         }),
     };
 
     let total_input_len: usize = inputs.iter().map(|s| s.len()).sum();
-    let mut writer: Vec<u8> = Vec::with_capacity(estimate_len(total_input_len, &lib));
-    writer.push(b'[');
+    let mut writer: Vec<u8> = Vec::with_capacity(estimate_len(total_input_len, &lib, method));
+    output_helper.write_start(&mut writer);
     inputs.into_iter().for_each(| text | {
         let lines: Vec<_> = text
             .split(|c| c == '\n' || c == '\r')
@@ -164,26 +221,24 @@ fn analyze_single (
             .collect();
 
         // tokenize and output results
-        writer.push(b'[');
+        output_helper.write_start(&mut writer);
         for no_eol in lines.into_iter() {
-            analyzer.analyze(no_eol, &mut writer);
-            writer.push(b',');
+            analyzer.analyze(no_eol, &mut writer, method);
+            output_helper.write_separator(&mut writer);
         }
-        if writer.last() == Some(&b',') { writer.pop(); }
-        writer.push(b']');
-        writer.push(b',');
-
-        //format!("[{}]", writer.join(","))
+        output_helper.write_end(&mut writer);
+        output_helper.write_chunk_separator(&mut writer);
     });
-    if writer.last() == Some(&b',') { writer.pop(); }
-    writer.push(b']');
+    output_helper.write_end(&mut writer);
     writer
 }
 
 fn analyze_multi(
     inputs: Vec<&str>,
-    lib: &SudachiLib
+    lib: &SudachiLib,
+    method: &str,
 ) -> Vec<u8> {
+    let output_helper = OutputHelper::new(method);
     let total_input_len: usize = inputs.iter().map(|s| s.len()).sum();
     let results: Vec<Vec<u8>> = inputs.into_par_iter().map_init(
         || {
@@ -193,10 +248,10 @@ fn analyze_multi(
             // 各スレッド専用の analyzer を作成
             let analyzer: Box<dyn Analysis> = match lib.split_sentences {
                 SentenceSplitMode::Only => Box::new(SplitSentencesOnly::new(&lib.dict)),
-                SentenceSplitMode::Default => with_output!(detail, lib.exclude_pos.clone(), |o| {
+                SentenceSplitMode::Default => with_output!(detail, lib.exclude_pos.clone(), method, |o| {
                     AnalyzeSplitted::new(o, &lib.dict, lib.mode, false)
                 }),
-                SentenceSplitMode::None => with_output!(detail, lib.exclude_pos.clone(), |o| {
+                SentenceSplitMode::None => with_output!(detail, lib.exclude_pos.clone(), method, |o| {
                     AnalyzeNonSplitted::new(o, &lib.dict, lib.mode, false)
                 }),
             };
@@ -208,32 +263,29 @@ fn analyze_multi(
                 .filter(|s| !s.is_empty())
                 .collect();
 
-            let mut local_writer = Vec::with_capacity(estimate_len(text.len(), &lib));
+            let mut local_writer = Vec::with_capacity(estimate_len(text.len(), &lib, method));
             // tokenize and output results
-            local_writer.push(b'[');
+            output_helper.write_start(&mut local_writer);
             for no_eol in lines.into_iter() {
-                analyzer.analyze(no_eol, &mut local_writer);
-                local_writer.push(b',');
+                analyzer.analyze(no_eol, &mut local_writer, method);
+                output_helper.write_separator(&mut local_writer);
             }
-            if local_writer.last() == Some(&b',') { local_writer.pop(); }
-            local_writer.push(b']');
-            local_writer.push(b',');
+            output_helper.write_end(&mut local_writer);
+            output_helper.write_chunk_separator(&mut local_writer);
             local_writer
     }).collect();
 
-    let mut writer = Vec::with_capacity(estimate_len(total_input_len, &lib));
-    writer.push(b'[');
+    let mut writer = Vec::with_capacity(estimate_len(total_input_len, &lib, method));
+    output_helper.write_start(&mut writer);
     for res in results.iter() {
-        //if i > 0 { writer.push(b','); }
         writer.extend_from_slice(res);
     }
-    if writer.last() == Some(&b',') { writer.pop(); }
-    writer.push(b']');
+    output_helper.write_end(&mut writer);
     writer
 }
 
-/// メインの解析関数
-/// input_json: ["text1", "text2"] のようなJSON文字列
+// メインの解析関数
+// input_json: ["text1", "text2"] のようなJSON文字列
 #[unsafe(no_mangle)]
 pub extern "C" fn analyze(
     ptr: *mut SudachiLib,
@@ -243,12 +295,13 @@ pub extern "C" fn analyze(
     let lib = unsafe { &mut *ptr };
     let input_str = unsafe { CStr::from_ptr(input_json).to_bytes() };
     if input_str.is_empty() {return std::ptr::null_mut()};
-    let inputs: Vec<&str> = serde_json::from_slice(input_str).unwrap_or_default();
+    let inputs: Vec<String> = serde_json::from_slice(input_str).unwrap();
+    let input_refs: Vec<&str> = inputs.iter().map(|v| v.as_str()).collect();
 
     let all_results = if lib.multi_thread {
-        analyze_multi(inputs, lib)
+        analyze_multi(input_refs, lib, "JSON")
     } else {
-        analyze_single(inputs, lib)
+        analyze_single(input_refs, lib, "JSON")
     };
 
     let res_ptr = CString::new(all_results).unwrap().into_raw();
@@ -263,10 +316,9 @@ pub extern "C" fn analyze(
     res_ptr
 }
 
-/// バイナリ形式での解析関数
-/// input_data: u32(length1) + text1_bytes + u32(length2) + text2_bytes + ... の形式
-/// 各テキストの前に4バイトのu32（リトルエンディアン）で長さを指定
-/// バッファの終わりまで自動的に読み込む（JSON形式と異なり終わりマーカー不要）
+// バイナリ形式での解析関数
+// input_data: u32(length1) + text1_bytes + u32(length2) + text2_bytes + ... の形式
+// 各テキストの前に4バイトのu32（リトルエンディアン）で長さを指定
 #[unsafe(no_mangle)]
 pub extern "C" fn analyze_raw(
     ptr: *mut SudachiLib,
@@ -281,7 +333,7 @@ pub extern "C" fn analyze_raw(
     };
     
     // バイナリデータをパース
-    let mut inputs_owned = Vec::new();
+    let mut inputs_owned: Vec<&str> = Vec::with_capacity(8132);
     let mut pos = 0;
     
     while pos < input_bytes.len() {
@@ -290,12 +342,7 @@ pub extern "C" fn analyze_raw(
         }
         
         // 4バイトをu32として読む（リトルエンディアン）
-        let len_bytes = [
-            input_bytes[pos],
-            input_bytes[pos + 1],
-            input_bytes[pos + 2],
-            input_bytes[pos + 3],
-        ];
+        let len_bytes = [input_bytes[pos], input_bytes[pos+1], input_bytes[pos+2], input_bytes[pos+3]];
         let text_len = u32::from_le_bytes(len_bytes) as usize;
         pos += 4;
         
@@ -305,7 +352,7 @@ pub extern "C" fn analyze_raw(
         
         // UTF-8文字列に変換
         if let Ok(text_str) = std::str::from_utf8(&input_bytes[pos..pos + text_len]) {
-            inputs_owned.push(text_str.to_string());
+            inputs_owned.push(text_str);
         }
         pos += text_len;
     }
@@ -314,16 +361,17 @@ pub extern "C" fn analyze_raw(
         return std::ptr::null_mut();
     }
     
-    let inputs_refs: Vec<&str> = inputs_owned.iter().map(|s| s.as_str()).collect();
-    
-    let all_results = if lib.multi_thread {
-        analyze_multi(inputs_refs, lib)
+    let mut all_results = if lib.multi_thread {
+        analyze_multi(inputs_owned, lib, "Raw")
     } else {
-        analyze_single(inputs_refs, lib)
+        analyze_single(inputs_owned, lib, "Raw")
     };
+    // Streamモードで複数回バッチ方式にする場合、anaryze_single/analyze_multi内でEOSを付けるとEOSがバッチ処理ごとに入ってしまう
+    // Streamモード導入を見越して、ここでEOSを付与する形にする
+    all_results.extend_from_slice(b"EOS\n");
 
     let res_ptr = CString::new(all_results).unwrap().into_raw();
-
+    
     unsafe {
         if !out_len.is_null() {
             let len = CStr::from_ptr(res_ptr).to_bytes().len() + 1;
@@ -333,7 +381,7 @@ pub extern "C" fn analyze_raw(
     res_ptr
 }
 
-/// メモリ解放用
+// メモリ解放用
 #[unsafe(no_mangle)]
 pub extern "C" fn free_string(s: *mut c_char) {
     unsafe {
@@ -351,96 +399,4 @@ pub extern "C" fn free_sudachi(ptr: *mut SudachiLib) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ptr;
-
-    // ヘルパー関数
-    fn run_analyze(lib_ptr: *mut SudachiLib, text: &str) -> String {
-        let input_json = format!(r#"["{}"]"#, text);
-        let c_input = CString::new(input_json).unwrap();
-        let mut out_len: usize = 0;
-        
-        let res_ptr = analyze(lib_ptr, c_input.as_ptr(), &mut out_len);
-        if res_ptr.is_null() {
-            return String::from("null");
-        }
-        
-        let result = unsafe { CStr::from_ptr(res_ptr).to_string_lossy().into_owned() };
-        free_string(res_ptr);
-        result
-    }
-
-    #[test]
-    fn test_all_patterns() {
-        let confing_path = CString::new("./resources/sudachi.json").unwrap();
-        // split_sentences: Only (文分割のみ)
-        let lib_only = init(confing_path.as_ptr(), 2, 0, 0, 1, ptr::null(), 0);
-        let res1 = run_analyze(lib_only, "今日はいい天気。明日は雨？明後日は地震雷火事親父！");
-        assert!(serde_json::from_str::<Vec<Vec<String>>>(&res1).unwrap() == [["今日はいい天気。明日は雨？", "明後日は地震雷火事親父！"]]);
-        free_sudachi(lib_only);
-
-        // wakati: true (わかち書き)
-        let lib_wakati = init(confing_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 0);
-        let res2 = run_analyze(lib_wakati, "「この味がいいね」と君が言ったから七月六日はサラダ記念日（俵万智『サラダ記念日』より");
-        assert!(serde_json::from_str::<Vec<Vec<String>>>(&res2).unwrap() == [["「", "この", "味", "が", "いい", "ね", "」", "と", "君", "が", "言っ", "た", "から", "七", "月", "六", "日", "は", "サラダ", "記念日", "（", "俵", "万智", "『", "サラダ", "記念日", "』", "より"]]);
-        free_sudachi(lib_wakati);
-
-        // wakati: false, print_all: false (標準構造)
-        let lib_simple = init(confing_path.as_ptr(), 2, 0, 0, 0, ptr::null(), 0);
-        let res3 = run_analyze(lib_simple, "記念日");
-        assert!(res3.contains("記念日"));
-        assert!(res3.contains("名詞"));
-        assert!(res3.contains("surface")); 
-        assert!(res3.contains("poses")); 
-        assert!(res3.contains("normalized_form")); 
-        assert!(!res3.contains("dictionary_form")); 
-        assert!(!res3.contains("reading_form")); 
-        free_sudachi(lib_simple);
-
-        // wakati: false, print_all: true (詳細構造)
-        let lib_detail = init(confing_path.as_ptr(), 2, 0, 1, 0, ptr::null(), 0);
-        let res4 = run_analyze(lib_detail, "記念日");
-        assert!(res4.contains("記念日"));
-        assert!(res4.contains("名詞"));
-        assert!(res4.contains("surface")); 
-        assert!(res4.contains("poses")); 
-        assert!(res4.contains("normalized_form")); 
-        assert!(res4.contains("dictionary_form")); 
-        assert!(res4.contains("reading_form")); 
-        free_sudachi(lib_detail);
-
-        // exclude_pos (品詞除外、"助詞" を除外する)
-        let exclude_json = CString::new(r#"["助詞", "助動詞"]"#).unwrap();
-        let lib_exclude = init(confing_path.as_ptr(), 2, 1, 0, 0, exclude_json.as_ptr(), 0);
-        let res5 = run_analyze(lib_exclude, "君が言った");
-        assert!(serde_json::from_str::<Vec<Vec<String>>>(&res5).unwrap() == [["君", "言っ"]]);
-        free_sudachi(lib_exclude);
-    }
-
-    #[test]
-    fn test_multi_thread() {
-        let confing_path = CString::new("./resources/sudachi.json").unwrap();
-        // is_multi を 1 に設定
-        let lib_multi = init(confing_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 1);
-        
-        // 複数の入力を準備
-        let input_json = CString::new(r#"["リンゴを食べます", "明日は晴れです", "東京に行きます"]"#).unwrap();
-        let mut out_len: usize = 0;
-        
-        let res_ptr = analyze(lib_multi, input_json.as_ptr(), &mut out_len);
-        assert!(!res_ptr.is_null());
-        
-        let result = unsafe { CStr::from_ptr(res_ptr).to_string_lossy().into_owned() };
-        
-        // JSONとしてパースできるか、期待した要素数（この場合3つ）があるか確認
-        let parsed: Vec<Vec<String>> = serde_json::from_str(&result).expect("Failed to parse multi-thread JSON");
-        assert_eq!(parsed.len(), 3);
-        assert!(parsed[0][0] == "リンゴ");
-        assert!(parsed[1][0] == "明日");
-        assert!(parsed[2][0] == "東京");
-
-        free_string(res_ptr);
-        free_sudachi(lib_multi);
-    }
-}
+mod tests;
