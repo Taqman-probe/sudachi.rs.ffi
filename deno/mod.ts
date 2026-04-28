@@ -24,6 +24,11 @@ export class Sudachi {
       parameters: ["pointer", "buffer", "u64", "buffer"],
       result: "pointer",
     },
+    analyze_callback: {
+      parameters: ["pointer", "buffer", "u64", "function", "pointer"],
+      result: "i32"      
+    },
+    
     free_string: {
       parameters: ["pointer"],
       result: "void",
@@ -109,6 +114,50 @@ export class Sudachi {
     const lenBuffer = new BigUint64Array(1); //確保するべき長さを格納させる
     const resultPtr = this.dylib.symbols.analyze_raw(this.ptr, buffer.subarray(0, offset), BigInt(offset), lenBuffer);
     return this.readAndFreeString(resultPtr, Number(lenBuffer[0])) || null;
+  }
+
+  analyzeCallback(
+    queries: string[],
+    onData: (text: string, userData: Deno.PointerValue) => void,
+    userData: Deno.PointerValue = null,
+  ): number {
+    const maxPossibleSize = queries.reduce((acc, s) => acc + 4 + (s.length * 4), 0);
+    const buffer = new Uint8Array(maxPossibleSize);
+    const view = new DataView(buffer.buffer);
+    const encoder = new TextEncoder();
+
+    let offset = 0;
+    for (const str of queries) {
+      // Back-patching1: 長さの値4バイト分は空にしたまま先に文字列をエンコードしながら埋める
+      const result = encoder.encodeInto(str, buffer.subarray(offset + 4));
+      // Back-patching2: 実際に書き込まれたバイト数をoffset先頭に遡って長さ情報として記録
+      view.setUint32(offset, result.written, true);
+      offset += 4 + result.written;
+    }
+    const callback = new Deno.UnsafeCallback(
+      {
+        parameters: ["buffer", "u64", "pointer"],
+        result: "void",
+      },
+      (bufPtr, len, userPtr) => {
+        if (bufPtr) {
+          // Rustから渡されたバイナリをデコード
+          const array = new Uint8Array(Deno.UnsafePointerView.getArrayBuffer(bufPtr, Number(len)));
+          const text = new TextDecoder().decode(array);
+          onData(text, userPtr);
+        }
+      },
+    );
+
+    const result = this.dylib.symbols.analyze_callback(
+      this.ptr,
+      buffer.subarray(0, offset),
+      BigInt(offset),
+      callback.pointer,
+      userData
+    );
+    callback.close();
+    return result;
   }
 
   close() {

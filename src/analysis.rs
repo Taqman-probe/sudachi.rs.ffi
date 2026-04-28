@@ -93,6 +93,7 @@ impl<'a, D: DictionaryAccess + 'a, O: SudachiOutput<&'a D>> AnalyzeSplitted<'a, 
     pub fn new(output: O, dict: &'a D, mode: Mode, enable_debug: bool) -> Self {
         Self {
             inner: AnalyzeNonSplitted::new(output, dict, mode, enable_debug),
+            // 。で区切りたい場合はcheckerを外す
             splitter: SentenceSplitter::new().with_checker(dict.lexicon()),
         }
     }

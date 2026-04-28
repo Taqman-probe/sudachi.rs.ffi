@@ -57,8 +57,9 @@ corpus_text = load_livedoor_corpus()
 tokenizer_obj = dictionary.Dictionary().create()
 mode = tokenizer.Tokenizer.SplitMode.C
 
-start = time.perf_counter()
-results = [tokenizer_obj.tokenize(text, mode) for text in corpus_text]
-end = time.perf_counter()
+for i in range(10):
+    start = time.perf_counter()
+    results = [tokenizer_obj.tokenize(text, mode) for text in corpus_text]
+    end = time.perf_counter()
 
-print(f"SudachiPy Total Time: {end - start:.4f} s")
+    print(f"SudachiPy Total Time: {end - start:.4f} s")

@@ -60,9 +60,13 @@ sudachi = new Sudachi ({
   multi: false // マルチスレッド
 });
 
-try {
-  const rawString = sudachi.analyzeRaw([`今日は来る？`, `明日は行く。`]) || "";
-  const results: Array<Array<Morpheme | EOS>> = [];
+const resultsDetail: Array<Array<Morpheme | EOS>> = [];
+let isEOS = false;
+const userDataId = new BigUint64Array([64n]);
+const userData = Deno.UnsafePointer.of(userDataId);
+
+const callbackDetail = (rawString: string, userPtr: Deno.PointerValue) => {
+  console.log(`userData in Callback: ${new Deno.UnsafePointerView(userPtr as Deno.PointerObject).getBigInt64()}`);
   const inter: Array<Morpheme | EOS> = [];
   let morpheme: Morpheme | EOS = { surface: "" } as EOS;
   let str = "";
@@ -74,7 +78,7 @@ try {
       str = "";
       eol = true;
     } else if (char === "\n" && eol) {
-      results.push([...inter]);
+      resultsDetail.push([...inter]);
       inter.splice(0);
       eol = false;
     } else {
@@ -82,11 +86,16 @@ try {
       str += char;
     }
   }
-  if (morpheme.surface !== "EOS") {
-    throw new Error("Stream truncated: EOS not found");
+  if (morpheme.surface == "EOS") {
+    isEOS = true;
   }
+}
 
-  console.log(results);
+try {
+  const num = sudachi.analyzeCallback([`今日は来る？`, `明日は行く。`], callbackDetail, userData);
+  console.log(num);
+  console.log(resultsDetail);
+  if (!isEOS) {console.log("Stream truncated: EOS not found")}
 } finally {
   sudachi.close();
   sudachi.dylibInstance.close();
@@ -103,22 +112,26 @@ sudachi = new Sudachi ({
   multi: false // マルチスレッド
 });
 
-try {
-  const rawString = sudachi.analyzeRaw([`今日は来る？`, `明日は行く。`]) || "";
-  const results: Array<Array<string>> = [];
+const resultsWakati: Array<Array<string>> = [];
+const callbackWakati = (rawString: string, userPtr: Deno.PointerValue) => {
+  console.log(`userData in Callback: ${new Deno.UnsafePointerView(userPtr as Deno.PointerObject).getBigInt64()}`);
   let str = "";
   for (const char of rawString) {
     if (char === "\n") {
       if (str !== "EOS") {
-        results.push(str.split(" "));
+        resultsWakati.push(str.split(" "));
       }
       str = "";
     } else {
       str += char;
     }
   }
+}
 
-  console.log(results);
+try {
+  const num = sudachi.analyzeCallback([`今日は来る？`, `明日は行く。`], callbackWakati, userData);
+  console.log(num);
+  console.log(resultsWakati);
 } finally {
   sudachi.close();
   sudachi.dylibInstance.close();

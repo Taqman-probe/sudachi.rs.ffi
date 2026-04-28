@@ -151,4 +151,96 @@ mod tests {
         assert!(result == "リンゴ を 食べ ます\n明日 は 晴れ です\n東京 に 行き ます\nEOS\n");
         free_sudachi(lib_multi);
     }
+    
+    // コールバックで受け取ったデータを格納するための構造体
+    struct CallbackState {
+        received_data: Vec<u8>,
+        call_count: usize,
+    }
+
+    // Cスタイルのコールバック関数
+    extern "C" fn test_callback(buffer: *const u8, len: usize, user_data: *mut std::ffi::c_void) {
+        let state = unsafe { &mut *(user_data as *mut CallbackState) };
+        let slice = unsafe { std::slice::from_raw_parts(buffer, len) };
+        state.received_data.extend_from_slice(slice);
+        state.call_count += 1;
+    }
+
+    #[test]
+    fn test_callback_basic() {
+        let config_path = CString::new("./resources/sudachi.json").unwrap();
+        // わかち書きモードで初期化
+        let lib = init(config_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 0);
+        
+        let mut state = CallbackState {
+            received_data: Vec::new(),
+            call_count: 0,
+        };
+
+        let texts = vec!["すもももももももものうち", "明日は明日の風が吹く"];
+        let mut input_data = Vec::new();
+        for text in texts {
+            let bytes = text.as_bytes();
+            let len = bytes.len() as u32;
+            input_data.extend_from_slice(&len.to_le_bytes());
+            input_data.extend_from_slice(bytes);
+        }
+
+        let result_code = analyze_callback(
+            lib,
+            input_data.as_ptr(),
+            input_data.len(),
+            test_callback,
+            &mut state as *mut _ as *mut std::ffi::c_void,
+        );
+
+        assert_eq!(result_code, 0);
+        let result_str = String::from_utf8(state.received_data).unwrap();
+        
+        // 内容の検証
+        assert!(result_str.contains("すもも も もも も もも の うち"));
+        assert!(result_str.contains("明日 は 明日 の 風 が 吹く"));
+        // 最後に必ず EOS が付与されているか
+        assert!(result_str.ends_with("EOS\n"));
+        // 少なくとも「データチャンク」と「EOS」で2回以上呼ばれているはず
+        assert!(state.call_count >= 2);
+
+        free_sudachi(lib);
+    }
+
+    #[test]
+    fn test_callback_large_amount() {
+        let config_path = CString::new("./resources/sudachi.json").unwrap();
+        let lib = init(config_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 0);
+        
+        let mut state = CallbackState {
+            received_data: Vec::new(),
+            call_count: 0,
+        };
+
+        // チャンク分割を誘発するために多めのデータを送る（100回繰り返し）
+        let single_text = "これはテストデータです。";
+        let mut input_data = Vec::new();
+        for _ in 0..100 {
+            let bytes = single_text.as_bytes();
+            let len = bytes.len() as u32;
+            input_data.extend_from_slice(&len.to_le_bytes());
+            input_data.extend_from_slice(bytes);
+        }
+
+        analyze_callback(
+            lib,
+            input_data.as_ptr(),
+            input_data.len(),
+            test_callback,
+            &mut state as *mut _ as *mut std::ffi::c_void,
+        );
+
+        let result_str = String::from_utf8(state.received_data).unwrap();
+        // 100回分正しく処理されているか（EOSを除外してカウント）
+        let lines: Vec<&str> = result_str.lines().filter(|l| *l != "EOS").collect();
+        assert_eq!(lines.len(), 100);
+        
+        free_sudachi(lib);
+    }
 }

@@ -35,8 +35,7 @@ async function loadLivedoorCorpus(): Promise<string[]> {
       console.warn(`Warning: Could not read directory ${category}. skipping...`);
     }
   }
-
-  return allTexts;
+  return allTexts;//.concat(allTexts);
 }
 
 const inputs = await loadLivedoorCorpus();
@@ -58,24 +57,6 @@ const baseConfig = {
   multi: false,
 };
 
-Deno.bench("Multi thread JSON", () => {
-  const sudachi = new Sudachi ({...baseConfig, multi: true});
-  try {
-    JSON.parse(sudachi.analyze(inputs)||"{}");
-  } finally {
-    sudachi.close();
-    sudachi.dylibInstance.close();
-  }
-});
-Deno.bench("Single thread JSON", () => {
-  const sudachi = new Sudachi ({...baseConfig});
-  try {
-    JSON.parse(sudachi.analyze(inputs) || "{}");
-  } finally {
-    sudachi.close();
-    sudachi.dylibInstance.close();
-  }
-});
 Deno.bench("Multi thread Raw", () => {
   const sudachi = new Sudachi ({...baseConfig, multi: true});
   try {
@@ -97,6 +78,41 @@ Deno.bench("Multi thread Raw", () => {
     sudachi.dylibInstance.close();
   }
 });
+
+Deno.bench("Multi thread Callback", () => {
+  const sudachi = new Sudachi ({...baseConfig, multi: true});
+  const callback = (rawString: string) => {
+    const results: Array<Array<string>> = [];
+    let str = "";
+    for (const char of rawString) {
+      if (char === "\n") {
+        if (str !== "EOS") {
+          results.push(str.split(" "));
+        }
+        str = "";
+      } else {
+        str += char;
+      }
+    }
+  }; 
+  try {
+    sudachi.analyzeCallback(inputs, callback);
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+
+Deno.bench("Multi thread JSON", () => {
+  const sudachi = new Sudachi ({...baseConfig, multi: true});
+  try {
+    JSON.parse(sudachi.analyze(inputs)||"{}");
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+
 Deno.bench("Single thread Raw", () => {
   const sudachi = new Sudachi ({...baseConfig});
   try {
@@ -113,6 +129,41 @@ Deno.bench("Single thread Raw", () => {
         str += char;
       }
     }
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+
+
+Deno.bench("Single thread Callback", () => {
+  const sudachi = new Sudachi ({...baseConfig});
+  const callback = (rawString: string) => {
+    const results: Array<Array<string>> = [];
+    let str = "";
+    for (const char of rawString) {
+      if (char === "\n") {
+        if (str !== "EOS") {
+          results.push(str.split(" "));
+        }
+        str = "";
+      } else {
+        str += char;
+      }
+    }
+  }; 
+  try {
+    sudachi.analyzeCallback(inputs, callback);
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+
+Deno.bench("Single thread JSON", () => {
+  const sudachi = new Sudachi ({...baseConfig});
+  try {
+    JSON.parse(sudachi.analyze(inputs) || "{}");
   } finally {
     sudachi.close();
     sudachi.dylibInstance.close();

@@ -184,9 +184,9 @@ fn estimate_len(
             if lib.wakati {
                 input_len * 4
             } else if lib.print_all {
-                input_len * 30
+                input_len * 35
             } else {
-                input_len * 25
+                input_len * 30
             }
         },
         _ => input_len
@@ -366,8 +366,8 @@ pub extern "C" fn analyze_raw(
     } else {
         analyze_single(inputs_owned, lib, "Raw")
     };
-    // Streamモードで複数回バッチ方式にする場合、anaryze_single/analyze_multi内でEOSを付けるとEOSがバッチ処理ごとに入ってしまう
-    // Streamモード導入を見越して、ここでEOSを付与する形にする
+    // callbackモードで複数回バッチ方式にする場合、anaryze_single/analyze_multi内でEOSを付けるとEOSがバッチ処理ごとに入ってしまう
+    // 処理を共通化するとここでEOSを付与する形になる
     all_results.extend_from_slice(b"EOS\n");
 
     let res_ptr = CString::new(all_results).unwrap().into_raw();
@@ -379,6 +379,96 @@ pub extern "C" fn analyze_raw(
         }
     }
     res_ptr
+}
+
+// コールバック関数の型定義
+type SudachiCallback = extern "C" fn(buffer: *const u8, len: usize, user_data: *mut std::ffi::c_void);
+
+// コールバックでの解析関数
+// 入力はanaryze_rauと同じ形式
+#[unsafe(no_mangle)]
+pub extern "C" fn analyze_callback(
+    ptr: *mut SudachiLib,
+    input_data: *const u8,
+    input_len: usize,
+    callback: SudachiCallback,
+    user_data: *mut std::ffi::c_void,
+  ) -> i32 {
+    let lib = unsafe { &mut *ptr };
+    
+    let input_bytes = unsafe {
+        std::slice::from_raw_parts(input_data, input_len)
+    };
+    
+    // バイナリデータをパース
+    let mut inputs_owned: Vec<&str> = Vec::with_capacity(8192);
+    let mut pos = 0;
+    
+    while pos < input_bytes.len() {
+        if pos + 4 > input_bytes.len() {
+            break; // 残りが4バイト未満の場合は終了
+        }
+        
+        // 4バイトをu32として読む（リトルエンディアン）
+        let len_bytes = [input_bytes[pos], input_bytes[pos+1], input_bytes[pos+2], input_bytes[pos+3]];
+        let text_len = u32::from_le_bytes(len_bytes) as usize;
+        pos += 4;
+        
+        if pos + text_len > input_bytes.len() {
+            break; // テキストがバッファを超える場合は終了
+        }
+        
+        // UTF-8文字列に変換
+        if let Ok(text_str) = std::str::from_utf8(&input_bytes[pos..pos + text_len]) {
+            inputs_owned.push(text_str);
+        }
+        pos += text_len;
+    }
+    
+    if inputs_owned.is_empty() { return 1; }
+
+    let num_inputs = inputs_owned.len();
+    if num_inputs == 0 { return 1; }
+
+    let total_chars: usize = inputs_owned.iter().map(|s| s.chars().count()).sum();
+    let avg_chars = total_chars / num_inputs;
+
+    // 出力モードに応じた1件あたりの予想倍率
+    // exclude_posで指定した品詞の出現率がわかればさらに精度があがる
+    let multiplier = if lib.wakati { 
+        1.3
+    } else if lib.print_all { 
+        14.0
+    } else { 
+        10.0
+    };
+
+    // 1回のコールバックで約 8MB 程度を目指す場合の件数
+    // (目標バイト数) / (平均文字数 * 3(UTF8) * 倍率)
+    let target_batch_bytes = 8 * 1024 * 1024;
+    let estimated_per_input = (avg_chars as f64 * 3 as f64 * multiplier) as usize;
+    let dynamic_chunk_size = (target_batch_bytes / estimated_per_input).max(1).min(8192);
+
+    for chunk in inputs_owned.chunks(dynamic_chunk_size) {
+        let chunk_vec = chunk.to_vec();
+        
+        let results = if lib.multi_thread {
+            analyze_multi(chunk_vec, lib, "Raw")
+        } else {
+            analyze_single(chunk_vec, lib, "Raw")
+        };
+
+        // バッチごとにコールバックを実行
+        if !results.is_empty() {
+            callback(results.as_ptr(), results.len(), user_data);
+        }
+    }
+
+    // 終了通知 (EOS) 
+    let eos = b"EOS\n";
+    callback(eos.as_ptr(), eos.len(), user_data);
+
+    0
 }
 
 // メモリ解放用

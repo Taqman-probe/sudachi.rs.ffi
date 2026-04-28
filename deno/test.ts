@@ -191,3 +191,45 @@ Deno.test("Sudachi FFI Raw", async (t) => {
     }
   });
 });
+
+
+Deno.test("Sudachi FFI Callback", async (t) => {
+await t.step("1. 基本的なコールバック実行", () => {
+  const sudachi = new Sudachi({ ...baseConfig, wakati: true });
+  try {
+    let fullResult = "";
+    // mod.ts の型定義 (text: string, userData: Deno.PointerValue) に合わせる
+    sudachi.analyzeCallback(
+      ["今日はいい天気です！", "明日は雨かな？", "明後日は知らん。"],
+      (text, _userPtr) => {
+        fullResult += text;
+      }
+    );
+    assertEquals(fullResult, "今日 は いい 天気 です ！\n明日 は 雨 か な ？\n明後日 は 知ら ん 。\nEOS\n");
+  } finally {
+    sudachi.close();
+    sudachi.dylibInstance.close();
+  }
+});
+
+  await t.step("2. 大量データのチャンク分割テスト", () => {
+    const sudachi = new Sudachi({ ...baseConfig, wakati: true });
+    
+    try {
+      let lineCount = 0;
+      // 200行のデータを投入して動的チャンク分割を走らせる
+      let fullResult = "";
+      const input = Array(200).fill("これはテストデータです。");
+      sudachi.analyzeCallback(input,
+        (text, _userPtr) => {
+        fullResult += text;
+        lineCount += text.split("\n").filter(l => l.trim() !== "" && l !== "EOS").length;
+      });
+
+      assertEquals(lineCount, 200);
+    } finally {
+      sudachi.close();
+      sudachi.dylibInstance.close();
+    }
+  });
+});
