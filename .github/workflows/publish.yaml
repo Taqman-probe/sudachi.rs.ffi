@@ -72,4 +72,4 @@ jobs:
       - name: Publish
         run: |
           cd jsr
-          npx jsr publish
+          npx jsr publish --allow-dirty
