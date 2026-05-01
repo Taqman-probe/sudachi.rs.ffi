@@ -1,4 +1,4 @@
-import { Sudachi } from "./mod.ts";
+import { Sudachi, SplitMode, SentenceSplitMode } from "./mod.ts";
 
 let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
 if (Deno.build.os === "windows") {
@@ -6,10 +6,10 @@ if (Deno.build.os === "windows") {
 } 
 const sudachi = new Sudachi ({
   configPath: configPath,
-  mode: 2,           // A:0 / B:1 / C:2
+  mode: SplitMode.C,           // A:0 / B:1 / C:2
   wakati: false,      // 分かち書き
   printAll: true,   // 詳細情報出力
-  splitSentences: 0, // default:0 / only:1 / none:2
+  splitSentences: SentenceSplitMode.Default, // default:0 / only:1 / none:2
   excludePos: ["補助記号", "助詞"], // 品詞除外設定
   multi: false // マルチスレッド
 });

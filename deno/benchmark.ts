@@ -1,5 +1,5 @@
 // BASE_PATHは/区切りで最後にも/を付ける必要がある (例: C:/temp/)
-import { Sudachi } from "./mod.ts";
+import { Sudachi, SudachiConfig, SplitMode, SentenceSplitMode } from "./mod.ts";
 
 const categories = [
   "dokujo-tsushin", "it-life-hack", "kaden-channel",
@@ -47,12 +47,12 @@ if (Deno.build.os === "windows") {
   configPath = configPath.slice(1);
 } 
 
-const baseConfig = {
+const baseConfig: SudachiConfig = {
   configPath: configPath,
-  mode: 2,
+  mode: SplitMode.C,
   wakati: true,
   printAll: false,
-  splitSentences: 0,
+  splitSentences: SentenceSplitMode.Default,
   excludePos: [],
   multi: false,
 };

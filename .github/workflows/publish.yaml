@@ -1,0 +1,75 @@
+name: Publish JSR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: libsudachi_ffi.so
+          - os: windows-latest
+            artifact_name: sudachi_ffi.dll
+          - os: macos-latest
+            artifact_name: libsudachi_ffi.dylib
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust Library
+        run: cargo build --release
+        env:
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=$HOME=~"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.os }}
+          path: |
+            target/release/sudachi_ffi.dll
+            target/release/libsudachi_ffi.so
+            target/release/libsudachi_ffi.dylib
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish to JSR
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-bins
+          pattern: bin-*
+          merge-multiple: true
+
+      - name: Copy files
+        run: |
+          mkdir jsr
+          cp -f deno/jsr.json jsr/jsr.json
+          cp -f deno/mod.ts jsr/mod.ts
+          cp -f deno/README_for_jsr.md              jsr/README.md
+          cp -f deno/sudachi_default_for_jsr.json   jsr/sudachi_default.json
+          cp -f resources/char.def                  jsr/char.def
+          cp -f LICENSE                             jsr/LICENSE
+          cp all-bins/*.dll jsr/ || true
+          cp all-bins/*.so jsr/ || true
+          cp all-bins/*.dylib jsr/ || true
+
+      - name: Publish
+        run: |
+          cd jsr
+          npx jsr publish

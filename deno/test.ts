@@ -1,17 +1,17 @@
 import { assertEquals } from "jsr:@std/assert@1.0.19";
-import { Sudachi } from "./mod.ts";
+import { Sudachi, SudachiConfig, SplitMode, SentenceSplitMode } from "./mod.ts";
 
 let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
 if (Deno.build.os === "windows") {
   configPath = configPath.slice(1);
 } 
 
-const baseConfig = {
+const baseConfig: SudachiConfig = {
   configPath: configPath,
-  mode: 2,
+  mode: SplitMode.C,
   wakati: false,
   printAll: false,
-  splitSentences: 0,
+  splitSentences: SentenceSplitMode.Default,
   excludePos: [],
   multi: false,
 };

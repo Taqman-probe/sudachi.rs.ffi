@@ -1,6 +1,7 @@
 {
     "path" : "./resources/",
     "systemDict" : "system_core.dic",
+    "characterDefinitionFile" : "char.def",
     "userDict" : [],
     "inputTextPlugin" : [
         { "class" : "$cfg/default_input_text" }

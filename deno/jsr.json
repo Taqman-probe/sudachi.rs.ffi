@@ -1,0 +1,18 @@
+{
+  "name": "@taqman/sudachi-ffi",
+  "version": "0.6.2",
+  "license": "Apache-2.0",
+  "exports": "./mod.ts",
+  "publish": {
+    "include": [
+      "mod.ts",
+      "sudachi_ffi.dll",
+      "libsudachi_ffi.so",
+      "libsudachi_ffi.dylib",
+      "sudachi_default.json",
+      "char.def",
+      "LICENSE",
+      "README.md"
+    ]
+  }
+}
