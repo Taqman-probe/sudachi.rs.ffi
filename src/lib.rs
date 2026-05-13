@@ -40,34 +40,44 @@ struct Cli {
     wakati: bool,
 }
 
+enum OutputFormat {
+    JSON,
+    Wakati,
+    Detail,
+}
 struct OutputHelper {
-    is_json: bool,
+    format: OutputFormat,
 }
 
 impl OutputHelper {
     fn new(method: &str) -> Self {
-        Self { is_json: method == "JSON" }
+        let format = match method {
+            "JSON" => OutputFormat::JSON,
+            "WAKATI" => OutputFormat::Wakati,
+            _ => OutputFormat::Detail,
+        };
+        Self { format }
     }
     fn write_start(&self, w: &mut Vec<u8>) {
-        if self.is_json { w.push(b'['); }
+        if let OutputFormat::JSON = self.format { w.push(b'['); }
     }
     fn write_end(&self, w: &mut Vec<u8>) {
-        if self.is_json {
+        if let OutputFormat::JSON = self.format {
             // 直前がカンマなら消してから閉じる（空振りの掃除）
             if w.last() == Some(&b',') { w.pop(); }
             w.push(b']');
         }
     }
     fn write_separator(&self, w: &mut Vec<u8>) {
-        if self.is_json {
+        if let OutputFormat::JSON = self.format {
             w.push(b',');
         }
     }
     fn write_chunk_separator(&self, w: &mut Vec<u8>) {
-        if self.is_json {
-            w.push(b',');
-        } else {
-            w.push(b'\n');
+        match self.format {
+            OutputFormat::JSON => { w.push(b',') },
+            OutputFormat::Wakati => { w.push(b'\n') },
+            _ => w.extend_from_slice(b"EOS\n")
         }
     }
 }
@@ -77,13 +87,13 @@ macro_rules! with_output {
         if $cli.wakati {
             match $method {
                 "JSON" => Box::new($f(output::WakachiJSON::new($exclude_pos))),
-                "Raw" => Box::new($f(output::WakachiRaw::new($exclude_pos))),
+                "WAKATI" => Box::new($f(output::WakachiRaw::new($exclude_pos))),
                 _ => panic!("Invalid method"),
              }
         } else {
             match $method {
                 "JSON" => Box::new($f(output::SimpleJSON::new($cli.print_all, $exclude_pos))),
-                "Raw" => Box::new($f(output::SimpleRaw::new($cli.print_all, $exclude_pos))),
+                "Detail" => Box::new($f(output::SimpleRaw::new($cli.print_all, $exclude_pos))),
                 _ => panic!("Invalid method"),
             }
         }
@@ -360,15 +370,18 @@ pub extern "C" fn analyze_raw(
     if inputs_owned.is_empty() {
         return std::ptr::null_mut();
     }
-    
-    let mut all_results = if lib.multi_thread {
-        analyze_multi(inputs_owned, lib, "Raw")
+
+    let method = if lib.wakati {
+        "WAKATI"
     } else {
-        analyze_single(inputs_owned, lib, "Raw")
+        "Detail"
     };
-    // callbackモードで複数回バッチ方式にする場合、anaryze_single/analyze_multi内でEOSを付けるとEOSがバッチ処理ごとに入ってしまう
-    // 処理を共通化するとここでEOSを付与する形になる
-    all_results.extend_from_slice(b"EOS\n");
+    
+    let all_results = if lib.multi_thread {
+        analyze_multi(inputs_owned, lib, method)
+    } else {
+        analyze_single(inputs_owned, lib, method)
+    };
 
     let res_ptr = CString::new(all_results).unwrap().into_raw();
     
@@ -448,14 +461,19 @@ pub extern "C" fn analyze_callback(
     let target_batch_bytes = 8 * 1024 * 1024;
     let estimated_per_input = (avg_chars as f64 * 3 as f64 * multiplier) as usize;
     let dynamic_chunk_size = (target_batch_bytes / estimated_per_input).max(1).min(8192);
+    let method = if lib.wakati {
+        "WAKATI"
+    } else {
+        "Detail"
+    };
 
     for chunk in inputs_owned.chunks(dynamic_chunk_size) {
         let chunk_vec = chunk.to_vec();
         
         let results = if lib.multi_thread {
-            analyze_multi(chunk_vec, lib, "Raw")
+            analyze_multi(chunk_vec, lib, method)
         } else {
-            analyze_single(chunk_vec, lib, "Raw")
+            analyze_single(chunk_vec, lib, method)
         };
 
         // バッチごとにコールバックを実行
@@ -464,9 +482,8 @@ pub extern "C" fn analyze_callback(
         }
     }
 
-    // 終了通知 (EOS) 
-    let eos = b"EOS\n";
-    callback(eos.as_ptr(), eos.len(), user_data);
+    // 終了通知 (EOS)
+    callback(std::ptr::null(), 0, user_data);
 
     0
 }

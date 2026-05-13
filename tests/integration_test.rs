@@ -69,7 +69,7 @@ fn test_raw_full_lifecycle() {
         assert_eq!(out_len, actual_bytes_with_nul, "out_len should include NUL terminator");
 
         let result_str = result_cstr.to_str().unwrap();
-        assert!(result_str == "プロジェクト に 関する お 問い合わせ 。\nEOS\n");
+        assert!(result_str == "プロジェクト に 関する お 問い合わせ 。\n");
 
         sudachi_ffi::free_string(res_ptr);
         sudachi_ffi::free_sudachi(lib_ptr);
@@ -84,8 +84,10 @@ struct TestCallbackState {
 // extern "C" なのでクロージャは使えず、静的な関数か関数ポインタが必要
 extern "C" fn integration_callback(buffer: *const u8, len: usize, user_data: *mut std::ffi::c_void) {
     let state = unsafe { &mut *(user_data as *mut TestCallbackState) };
-    let slice = unsafe { std::slice::from_raw_parts(buffer, len) };
-    state.output.extend_from_slice(slice);
+    if !buffer.is_null() && len > 0 {
+        let slice = unsafe { std::slice::from_raw_parts(buffer, len) };
+        state.output.extend_from_slice(slice);
+    }
 }
 
 #[test]
@@ -122,8 +124,8 @@ fn test_callback_full_lifecycle() {
         assert_eq!(res, 0);
         let result_str = String::from_utf8(state.output).unwrap();
         
-        // callback形式は内部で Raw モードとして扱われるため、空白区切り + EOS
-        assert!(result_str == "プロジェクト に 関する お 問い合わせ 。\nEOS\n");
+        // callback形式は内部で Raw モードとして扱われるため、空白区切り
+        assert!(result_str == "プロジェクト に 関する お 問い合わせ 。\n");
         
         sudachi_ffi::free_sudachi(lib_ptr);
     }

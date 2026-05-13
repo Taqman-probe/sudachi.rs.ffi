@@ -110,32 +110,32 @@ mod tests {
         // split_sentences: Only (文分割のみ)
         let lib_only = init(config_path.as_ptr(), 2, 0, 0, 1, ptr::null(), 0);
         let res1 = run_analyze_raw(lib_only, vec!["今日はいい天気。明日は雨？明後日は地震雷火事親父！", "え？明々後日・・・"]);
-        assert!(&res1 == "今日はいい天気。明日は雨？\n明後日は地震雷火事親父！\n\nえ？\n明々後日・・・\n\nEOS\n");
+        assert!(&res1 == "今日はいい天気。明日は雨？\n明後日は地震雷火事親父！\nEOS\nえ？\n明々後日・・・\nEOS\n");
         free_sudachi(lib_only);
 
         // wakati: true (わかち書き)
         let lib_wakati = init(config_path.as_ptr(), 2, 1, 0, 0, ptr::null(), 0);
         let res2 = run_analyze_raw(lib_wakati, vec!["「この味がいいね」と君が言ったから七月六日はサラダ記念日（俵万智『サラダ記念日』より"]);
-        assert!(&res2 == "「 この 味 が いい ね 」 と 君 が 言っ た から 七 月 六 日 は サラダ 記念日 （ 俵 万智 『 サラダ 記念日 』 より\nEOS\n");
+        assert!(&res2 == "「 この 味 が いい ね 」 と 君 が 言っ た から 七 月 六 日 は サラダ 記念日 （ 俵 万智 『 サラダ 記念日 』 より\n");
         free_sudachi(lib_wakati);
 
         // wakati: false, print_all: false (標準構造)
         let lib_simple = init(config_path.as_ptr(), 2, 0, 0, 0, ptr::null(), 0);
         let res3 = run_analyze_raw(lib_simple, vec!["記念日"]);
-        assert!(res3 == "記念日\t名詞,普通名詞,一般,*,*,*\t記念日\n\nEOS\n");
+        assert!(res3 == "記念日\t名詞,普通名詞,一般,*,*,*\t記念日\nEOS\n");
         free_sudachi(lib_simple);
 
         // wakati: false, print_all: true (詳細構造)
         let lib_detail = init(config_path.as_ptr(), 2, 0, 1, 0, ptr::null(), 0);
         let res4 = run_analyze_raw(lib_detail, vec!["記念日"]);
-        assert!(res4 == "記念日\t名詞,普通名詞,一般,*,*,*\t記念日\t記念日\tキネンビ\t0\t[]\n\nEOS\n");
+        assert!(res4 == "記念日\t名詞,普通名詞,一般,*,*,*\t記念日\t記念日\tキネンビ\t0\t[]\nEOS\n");
         free_sudachi(lib_detail);
 
         // exclude_pos (品詞除外、"助詞" を除外する)
         let exclude_json = CString::new(r#"["助詞", "助動詞"]"#).unwrap();
         let lib_exclude = init(config_path.as_ptr(), 2, 1, 0, 0, exclude_json.as_ptr(), 0);
         let res5 = run_analyze_raw(lib_exclude, vec!["君が言った"]);
-        assert!(&res5 == "君 言っ\nEOS\n");
+        assert!(&res5 == "君 言っ\n");
         free_sudachi(lib_exclude);
     }
 
@@ -148,7 +148,7 @@ mod tests {
         // 複数の入力を準備
         let input_json = vec!["リンゴを食べます", "明日は晴れです", "東京に行きます"];
         let result = run_analyze_raw(lib_multi, input_json);
-        assert!(result == "リンゴ を 食べ ます\n明日 は 晴れ です\n東京 に 行き ます\nEOS\n");
+        assert!(result == "リンゴ を 食べ ます\n明日 は 晴れ です\n東京 に 行き ます\n");
         free_sudachi(lib_multi);
     }
     
@@ -161,8 +161,10 @@ mod tests {
     // Cスタイルのコールバック関数
     extern "C" fn test_callback(buffer: *const u8, len: usize, user_data: *mut std::ffi::c_void) {
         let state = unsafe { &mut *(user_data as *mut CallbackState) };
-        let slice = unsafe { std::slice::from_raw_parts(buffer, len) };
-        state.received_data.extend_from_slice(slice);
+        if !buffer.is_null() && len > 0 {
+            let slice = unsafe { std::slice::from_raw_parts(buffer, len) };
+            state.received_data.extend_from_slice(slice);
+        }
         state.call_count += 1;
     }
 
@@ -200,9 +202,7 @@ mod tests {
         // 内容の検証
         assert!(result_str.contains("すもも も もも も もも の うち"));
         assert!(result_str.contains("明日 は 明日 の 風 が 吹く"));
-        // 最後に必ず EOS が付与されているか
-        assert!(result_str.ends_with("EOS\n"));
-        // 少なくとも「データチャンク」と「EOS」で2回以上呼ばれているはず
+        // 少なくとも「データチャンク」とstd::ptr::null()で2回以上呼ばれているはず
         assert!(state.call_count >= 2);
 
         free_sudachi(lib);

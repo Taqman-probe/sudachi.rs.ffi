@@ -62,11 +62,24 @@ target/release/sudachi_ffi.dll
 
 #### TypeScript & Deno から利用
 
+本ライブラリは **[JSR (@taqman/sudachi-ffi)](https://jsr.io/@taqman/sudachi-ffi)** にも公開されています。
+Deno環境では、JSRパッケージ @taqman/sudachi-ffi を使用することで、FFIのお決まりのセットアップをすべてスキップできます。
+
+```bash
+deno add jsr:@taqman/sudachi-ffi
+# 必要なアセット（バイナリ・設定ファイル）を一括ダウンロード
+deno eval "import { setupDefaultAssets } from 'jsr:@taqman/sudachi-ffi'; await setupDefaultAssets();"
+```
+
 * TypeScript
 ```ts
 import { Sudachi } from "./mod.ts";
 
+// githubの構成の場合
 let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
+// JSRからセットアップした場合
+// let configPath = new URL("./sudachi_default.json", import.meta.url).pathname;
+
 if (Deno.build.os === "windows") {
   configPath = configPath.slice(1);
 } 
@@ -187,6 +200,18 @@ deno run --allow-ffi --allow-read --allow-env deno/exsample.ts
 | analyze_raw | Binary  | パースは最速。ホスト言語側の長さ情報を付与したバイナリを直接参照するため、メモリを効率よく使用します。ただし結果を一度に巨大な文字列として受け取るため、極端に大きなデータではメモリを圧迫します。 |
 | analyze_callback | Binary | 巨大テキスト用。 結果を Callback で返すため、メモリ消費を一定 (推定出力 8MB 単位) に抑えられ、ホスト言語側で入力テキストが保持できていれば処理可能になります。 |
 
+### 制御文字 (改行・タブ文字) の扱いに関する注意
+
+* いずれの形式においても改行は処理単位を区切るための制御文字として作用し、解析されることはありません。区切り文字として認識させたい場合はクレンジング処理を行ってください。
+
+* JSON形式: 文字列がJSONとしてエンコードされているため、本文中のタブは \t として安全に転送されます。「文中のタブ文字を維持したまま解析したい」場合はJSON形式を推奨します。
+
+* Raw / Callback形式: 高速化のため、出力結果の区切り文字として「タブ (項目区切り)」を直接使用しています。そのため、入力テキストにタブ文字が含まれていると、出力結果の構造が壊れてしまいます。Raw / Callbackを利用する場合は事前にタブ文字のクレンジング処理を行ってください。
+
+  改行 (\n, \r\n) → 空白または句読点に置換
+
+  タブ (\t) → 空白に置換
+
 #### analyze_raw の使用例と結果 (Deno)
 ```ts
 const rawResult = sudachi.analyzeRaw(["今日は来る？", "明日は行く。"]);
@@ -194,20 +219,18 @@ console.log(rawResult);
 // wakati: true 時
 // 今日 は 来る ？
 // 明日 は 行く 。
-// EOS
 
 // wakati: false, print_all: true 時 (入力文字列に対応する区切りは改行2回)
 // 今日    名詞,普通名詞,副詞可能,*,*,*    今日    今日    キョウ  0       [981]
 // は      助詞,係助詞,*,*,*,*     は      は      ハ      0       []
 // 来る    動詞,非自立可能,*,*,カ行変格,終止形-一般        来る    来る    クル    0       []
 // ？      補助記号,句点,*,*,*,*   ?       ?       ?       0       []
-//
+// EOS
 // 明日    名詞,普通名詞,副詞可能,*,*,*    明日    明日    アス    0       [13183]
 // は      助詞,係助詞,*,*,*,*     は      は      ハ      0       []
 // 行く    動詞,非自立可能,*,*,五段-カ行,終止形-一般       行く    行く    イク    0       []
 // 。      補助記号,句点,*,*,*,*   。      。      。      0       []
-//
-//EOS
+// EOS
 ```
 ---
 

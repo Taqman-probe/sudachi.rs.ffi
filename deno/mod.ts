@@ -286,7 +286,7 @@ export class Sudachi {
    */
   public analyzeCallback(
     queries: string[],
-    onData: (text: string, userData: Deno.PointerValue) => void,
+    onData: (text: string, length: number, userData: Deno.PointerValue) => void,
     userData: Deno.PointerValue = null,
   ): number {
     const maxPossibleSize = queries.reduce(
@@ -310,12 +310,14 @@ export class Sudachi {
         result: "void",
       },
       (bufPtr, len, userPtr) => {
-        if (bufPtr) {
+        if (bufPtr && len > 0) {
           const array = new Uint8Array(
             Deno.UnsafePointerView.getArrayBuffer(bufPtr, Number(len)),
           );
           const text = new TextDecoder().decode(array);
-          onData(text, userPtr);
+          onData(text, Number(len), userPtr);
+        } else {
+          onData("", 0, userPtr)
         }
       },
     );

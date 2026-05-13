@@ -56,29 +56,28 @@ sudachi = new Sudachi ({
   wakati: false,      // 分かち書き
   printAll: true,   // 詳細情報出力
   splitSentences: SentenceSplitMode.Default, // default:0 / only:1 / none:2
-  excludePos: ["補助記号", "助詞"], // 品詞除外設定
+  excludePos: [], // 品詞除外設定
   multi: false // マルチスレッド
 });
 
 try {
   const rawString = sudachi.analyzeRaw([`今日は来る？`, `明日は行く。`]) || "";
+  console.log(rawString);
   const results: Array<Array<Morpheme | EOS>> = [];
   const inter: Array<Morpheme | EOS> = [];
   let morpheme: Morpheme | EOS = { surface: "" } as EOS;
   let str = "";
-  let eol = false;
   for (const char of rawString) {
-    if (char === "\n" && !eol) {
+    if (char === "\n") {
       morpheme = splitMorpheme(str);
-      inter.push(morpheme);
       str = "";
-      eol = true;
-    } else if (char === "\n" && eol) {
-      results.push([...inter]);
-      inter.splice(0);
-      eol = false;
+      if ("pos" in morpheme) {
+        inter.push(morpheme);
+      } else {
+        results.push([...inter]);
+        inter.splice(0);
+      }
     } else {
-      eol = false;
       str += char;
     }
   }
@@ -99,19 +98,18 @@ sudachi = new Sudachi ({
   wakati: true,      // 分かち書き
   printAll: false,   // 詳細情報出力
   splitSentences: SentenceSplitMode.Default, // default:0 / only:1 / none:2
-  excludePos: ["補助記号", "助詞"], // 品詞除外設定
+  excludePos: [], // 品詞除外設定
   multi: false // マルチスレッド
 });
 
 try {
   const rawString = sudachi.analyzeRaw([`今日は来る？`, `明日は行く。`]) || "";
+  console.log(rawString);
   const results: Array<Array<string>> = [];
   let str = "";
   for (const char of rawString) {
     if (char === "\n") {
-      if (str !== "EOS") {
-        results.push(str.split(" "));
-      }
+      results.push(str.split(" "));
       str = "";
     } else {
       str += char;

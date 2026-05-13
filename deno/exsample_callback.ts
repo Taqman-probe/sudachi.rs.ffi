@@ -61,33 +61,31 @@ sudachi = new Sudachi ({
 });
 
 const resultsDetail: Array<Array<Morpheme | EOS>> = [];
-let isEOS = false;
 const userDataId = new BigUint64Array([64n]);
 const userData = Deno.UnsafePointer.of(userDataId);
 
-const callbackDetail = (rawString: string, userPtr: Deno.PointerValue) => {
+const callbackDetail = (rawString: string, length: number, userPtr: Deno.PointerValue) => {
   console.log(`userData in Callback: ${new Deno.UnsafePointerView(userPtr as Deno.PointerObject).getBigInt64()}`);
+  if (rawString === "" && length === 0) {
+    console.log("Received all.");
+    return;
+  }
   const inter: Array<Morpheme | EOS> = [];
   let morpheme: Morpheme | EOS = { surface: "" } as EOS;
   let str = "";
-  let eol = false;
   for (const char of rawString) {
-    if (char === "\n" && !eol) {
+    if (char === "\n") {
       morpheme = splitMorpheme(str);
-      inter.push(morpheme);
       str = "";
-      eol = true;
-    } else if (char === "\n" && eol) {
-      resultsDetail.push([...inter]);
-      inter.splice(0);
-      eol = false;
+      if ("pos" in morpheme) {
+        inter.push(morpheme);
+      } else {
+        resultsDetail.push([...inter]);
+        inter.splice(0);
+      }
     } else {
-      eol = false;
       str += char;
     }
-  }
-  if (morpheme.surface == "EOS") {
-    isEOS = true;
   }
 }
 
@@ -95,7 +93,6 @@ try {
   const num = sudachi.analyzeCallback([`今日は来る？`, `明日は行く。`], callbackDetail, userData);
   console.log(num);
   console.log(resultsDetail);
-  if (!isEOS) {console.log("Stream truncated: EOS not found")}
 } finally {
   sudachi.close();
   sudachi.dylibInstance.close();
@@ -113,14 +110,12 @@ sudachi = new Sudachi ({
 });
 
 const resultsWakati: Array<Array<string>> = [];
-const callbackWakati = (rawString: string, userPtr: Deno.PointerValue) => {
+const callbackWakati = (rawString: string, _length: number, userPtr: Deno.PointerValue) => {
   console.log(`userData in Callback: ${new Deno.UnsafePointerView(userPtr as Deno.PointerObject).getBigInt64()}`);
   let str = "";
   for (const char of rawString) {
     if (char === "\n") {
-      if (str !== "EOS") {
-        resultsWakati.push(str.split(" "));
-      }
+      resultsWakati.push(str.split(" "));
       str = "";
     } else {
       str += char;

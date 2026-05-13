@@ -62,11 +62,24 @@ target/release/sudachi_ffi.dll
 
 #### Using from TypeScript & Deno
 
+This library is also available on **[JSR (@taqman/sudachi-ffi)](https://jsr.io/@taqman/sudachi-ffi)**.
+In a Deno environment, you can skip all the usual FFI setup steps by using the JSR package @taqman/sudachi-ffi.
+
+```bash
+deno add jsr:@taqman/sudachi-ffi
+# Download all required assets (binaries and configuration files) at once
+deno eval "import { setupDefaultAssets } from 'jsr:@taqman/sudachi-ffi'; await setupDefaultAssets();"
+```
+
 * TypeScript
 ```ts
 import { Sudachi } from "./mod.ts";
 
+// For GitHub configurations
 let configPath = new URL("../resources/sudachi_default.json", import.meta.url).pathname;
+// For set up from JSR
+// let configPath = new URL("./sudachi_default.json", import.meta.url).pathname;
+
 if (Deno.build.os === "windows") {
   configPath = configPath.slice(1);
 } 
@@ -187,6 +200,18 @@ This library provides 3 interfaces depending on your use case.
 | analyze_raw |	Binary | Fastest parsing. Because it directly references the binary with length information provided by the host language, it uses memory efficiently. However, since the results are received as a single massive string, it can consume memory when dealing with extremely large datasets. |
 | analyze_callback |Binary | For huge text. Returns results via callback, keeping memory consumption constant (estimated ~8MB output units). This can be processed as long as the input text is retained on the host language side. |
 
+### Notes on Handling Control Characters (Line Breaks and Tabs)
+
+* In all formats, line breaks act as control characters to delimit processing units and are not parsed. If you want them to be recognized as delimiters, please perform data cleansing.
+
+* JSON format: Since the string is encoded as JSON, tabs within the text are safely transferred as \t. We recommend the JSON format if you want to parse the data while preserving the tabs within the text.
+
+* Raw / Callback formats: To improve performance, “tabs (item delimiters)” are used directly as delimiters in the output results. Therefore, if the input text contains tab characters, the structure of the output results will be corrupted. If you use Raw / Callback, please perform tab character cleansing beforehand.
+
+  Line breaks (\n, \r\n) → Replace with spaces or punctuation marks
+
+  Tabs (\t) → Replace with spaces
+
 #### analyze_raw Usage Example and Results (Deno)
 
 ```ts
@@ -195,20 +220,18 @@ console.log(rawResult);
 // When wakati: true
 // 今日 は 来る ？
 // 明日 は 行く 。
-// EOS
 
 // When wakati: false, print_all: true (double space separates input strings)
 // 今日    名詞,普通名詞,副詞可能,*,*,*    今日    今日    キョウ  0       [981]
 // は      助詞,係助詞,*,*,*,*     は      は      ハ      0       []
 // 来る    動詞,非自立可能,*,*,カ行変格,終止形-一般        来る    来る    クル    0       []
 // ？      補助記号,句点,*,*,*,*   ?       ?       ?       0       []
-//
+// EOS
 // 明日    名詞,普通名詞,副詞可能,*,*,*    明日    明日    アス    0       [13183]
 // は      助詞,係助詞,*,*,*,*     は      は      ハ      0       []
 // 行く    動詞,非自立可能,*,*,五段-カ行,終止形-一般       行く    行く    イク    0       []
 // 。      補助記号,句点,*,*,*,*   。      。      。      0       []
-//
-//EOS
+// EOS
 ```
 ---
 

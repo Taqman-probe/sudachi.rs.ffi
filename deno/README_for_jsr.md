@@ -70,6 +70,14 @@ try {
 }
 ```
 
+### 🔗 Resources & Further Examples
+
+For more detailed information, source code, and additional usage examples (including raw and callback mode), please visit the main GitHub repository:
+
+* **[GitHub: Taqman-probe/sudachi.rs.ffi](https://github.com/Taqman-probe/sudachi.rs.ffi)**
+
+The GitHub repository's `README_ja.md` provides comprehensive documentation in Japanese.
+
 ---
 
 ## ⚙️ Configuration

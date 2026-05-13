@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "sudachi-rs-ffi"
-version = "0.6.11-3"
+version = "0.6.11-4"
 dependencies = [
  "rayon",
  "serde",
